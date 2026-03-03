@@ -1,0 +1,121 @@
+{
+  "projectType": "ai-ml",
+  "projectName": "AlpaSim",
+  "projectDescription": "A modular, lightweight, and data-driven research simulator for autonomous driving",
+  "theme": "aspen",
+  "primaryColor": "#76B900",
+  "lightColor": "#9ACD32",
+  "darkColor": "#5A8F00",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "onboarding"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/design-principles",
+              "concepts/microservices",
+              "concepts/coordinate-systems"
+            ]
+          },
+          {
+            "group": "User Guides",
+            "pages": [
+              "guides/driver-policies",
+              "guides/scenes",
+              "guides/configuration",
+              "guides/evaluation",
+              "guides/results"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/debugging",
+              "advanced/custom-components",
+              "advanced/operations",
+              "advanced/data-pipeline",
+              "advanced/manual-driver"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "gRPC Services",
+            "pages": [
+              "api/grpc/overview",
+              "api/grpc/controller",
+              "api/grpc/driver",
+              "api/grpc/physics",
+              "api/grpc/sensorsim",
+              "api/grpc/traffic"
+            ]
+          },
+          {
+            "group": "Python Modules",
+            "pages": [
+              "api/runtime",
+              "api/wizard",
+              "api/eval",
+              "api/utils"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Community",
+        "groups": [
+          {
+            "group": "Contributing",
+            "pages": [
+              "community/contributing",
+              "community/code-standards",
+              "community/maintainers"
+            ]
+          },
+          {
+            "group": "Resources",
+            "pages": [
+              "community/changelog",
+              "community/security",
+              "community/license"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Neural rendering (NuRec) for photorealistic sensor simulation",
+    "Microservices architecture for horizontal scalability",
+    "Python-based for research hackability",
+    "Support for multiple driving policies (Alpamayo-R1, VaVAM, Transfuser)",
+    "Closed-loop simulation with realistic vehicle dynamics",
+    "Comprehensive evaluation metrics and visualization",
+    "Docker and SLURM deployment support"
+  ],
+  "publicApiSurface": [
+    "alpasim_wizard CLI tool",
+    "gRPC Controller service",
+    "gRPC Driver service",
+    "gRPC Physics service",
+    "gRPC SensorSim service",
+    "gRPC Traffic service",
+    "Runtime simulation engine",
+    "Evaluation framework",
+    "ASL log format"
+  ]
+}
