@@ -1,0 +1,470 @@
+---
+title: Runtime Python Module
+description: Core simulation orchestration and rollout execution
+---
+
+The `alpasim_runtime` module orchestrates the AlpaSim simulation. It manages communication between gRPC services, executes rollouts, and handles logging and evaluation.
+
+## Installation
+
+The runtime is installed as part of the AlpaSim workspace:
+
+```bash
+# From repository root
+./setup_local_env.sh
+source .venv/bin/activate
+```
+
+The runtime module is located at `src/runtime/alpasim_runtime/`.
+
+## Core Classes
+
+### UnboundRollout
+
+Represents rollout metadata and configuration before execution.
+
+```python
+from alpasim_runtime.loop import UnboundRollout
+from alpasim_runtime.config import ScenarioConfig
+
+# Create from scenario configuration
+unbound = UnboundRollout.create(
+    scenario_config=scenario_cfg,
+    user_sim_config=user_cfg,
+    camera_configs=cameras,
+    vehicle_config=vehicle_cfg
+)
+```
+
+<ParamField path="scenario_config" type="ScenarioConfig" required>
+  Scene ID, timestamps, and scenario metadata
+</ParamField>
+
+<ParamField path="user_sim_config" type="UserSimulatorConfig" required>
+  Service endpoints and simulation parameters
+</ParamField>
+
+<ParamField path="camera_configs" type="list[RuntimeCameraConfig]" required>
+  Camera specifications for rendering
+</ParamField>
+
+<ParamField path="vehicle_config" type="VehicleConfig" required>
+  Vehicle dimensions and physics parameters
+</ParamField>
+
+### BoundRollout
+
+Executable rollout bound to gRPC service connections.
+
+```python
+from alpasim_runtime.dispatcher import Dispatcher
+
+# Create service dispatcher
+dispatcher = Dispatcher.create(network_config, scene_artifacts)
+
+# Bind rollout to services
+bound = await unbound.bind(
+    dispatcher=dispatcher,
+    vector_map=map_data,
+    traffic_objects=traffic_data
+)
+
+# Execute simulation
+result = await bound.run()
+```
+
+**Methods:**
+
+<ResponseField name="run" type="async ScenarioEvalResult">
+  Execute the rollout and return evaluation metrics
+</ResponseField>
+
+### Dispatcher
+
+Manages gRPC service connections and load balancing.
+
+```python
+from alpasim_runtime.dispatcher import Dispatcher
+from alpasim_runtime.config import NetworkSimulatorConfig
+
+dispatcher = Dispatcher.create(
+    network_config=NetworkSimulatorConfig(
+        sensorsim=EndpointAddresses(addresses=["localhost:50051"]),
+        driver=EndpointAddresses(addresses=["localhost:50052"]),
+        physics=EndpointAddresses(addresses=["localhost:50053"]),
+        trafficsim=EndpointAddresses(addresses=["localhost:50054"]),
+        controller=EndpointAddresses(addresses=["localhost:50055"])
+    ),
+    scene_artifacts=artifacts
+)
+
+# Get service connections
+sensorsim = await dispatcher.get_sensorsim_service()
+driver = await dispatcher.get_driver_service()
+controller = await dispatcher.get_controller_service()
+physics = await dispatcher.get_physics_service()
+traffic = await dispatcher.get_traffic_service()
+```
+
+## Configuration
+
+### ScenarioConfig
+
+Defines a single simulation scenario.
+
+```python
+from alpasim_runtime.config import ScenarioConfig
+
+scenario = ScenarioConfig(
+    scene_id="waymo_sf_001",
+    clip_start_time_us=1000000,
+    clip_end_time_us=10000000,
+    random_seed=42
+)
+```
+
+<ParamField path="scene_id" type="str" required>
+  Scene identifier (must match sensorsim/physics scenes)
+</ParamField>
+
+<ParamField path="clip_start_time_us" type="int" required>
+  Simulation start time (microseconds)
+</ParamField>
+
+<ParamField path="clip_end_time_us" type="int" required>
+  Simulation end time (microseconds)
+</ParamField>
+
+<ParamField path="random_seed" type="int">
+  Seed for reproducibility
+</ParamField>
+
+### RuntimeCameraConfig
+
+Camera rendering configuration.
+
+```python
+from alpasim_runtime.config import RuntimeCameraConfig
+
+camera = RuntimeCameraConfig(
+    logical_id="camera_front_wide_120fov",
+    height=720,
+    width=1280,
+    frame_interval_us=33000,  # ~30fps
+    shutter_duration_us=17000,
+    first_frame_offset_us=0
+)
+```
+
+<ParamField path="logical_id" type="str" required>
+  Camera identifier (must match sensorsim available cameras)
+</ParamField>
+
+<ParamField path="height" type="int" required>
+  Image height in pixels
+</ParamField>
+
+<ParamField path="width" type="int" required>
+  Image width in pixels
+</ParamField>
+
+<ParamField path="frame_interval_us" type="int" required>
+  Time between frames (microseconds)
+</ParamField>
+
+<ParamField path="shutter_duration_us" type="int" required>
+  Exposure duration (microseconds)
+</ParamField>
+
+### UserSimulatorConfig
+
+Runtime behavior configuration.
+
+```python
+from alpasim_runtime.config import (
+    UserSimulatorConfig,
+    PhysicsUpdateMode,
+    RouteGeneratorType
+)
+
+config = UserSimulatorConfig(
+    enable_rendering=True,
+    enable_eval=True,
+    physics_update_mode=PhysicsUpdateMode.ONCE_PER_STEP,
+    route_generator_type=RouteGeneratorType.FROM_GROUND_TRUTH,
+    egomotion_noise_model=None
+)
+```
+
+<ParamField path="enable_rendering" type="bool">
+  Whether to render camera images
+</ParamField>
+
+<ParamField path="enable_eval" type="bool">
+  Whether to compute evaluation metrics
+</ParamField>
+
+<ParamField path="physics_update_mode" type="PhysicsUpdateMode">
+  - `ONCE_PER_STEP`: Single physics update per timestep
+  - `TWICE_PER_STEP`: Update before and after controller
+</ParamField>
+
+<ParamField path="route_generator_type" type="RouteGeneratorType">
+  - `FROM_GROUND_TRUTH`: Use recorded route
+  - `FROM_MAP`: Generate from road network
+</ParamField>
+
+## Service Wrappers
+
+The runtime provides typed wrappers for each gRPC service:
+
+### ControllerService
+
+```python
+from alpasim_runtime.services.controller_service import ControllerService
+
+controller = ControllerService(grpc_stub, session_uuid)
+
+# Start session
+await controller.start_session(rig_file="config.yaml")
+
+# Propagate vehicle
+result = await controller.run_controller_and_vehicle(
+    state=current_state,
+    planned_trajectory=desired_path,
+    future_time_us=next_timestamp,
+    coerce_dynamic_state=False
+)
+
+# Access results
+pose = result.pose_local_to_rig  # PoseAtTime
+dynamic_state = result.dynamic_state  # DynamicState
+```
+
+### DriverService
+
+```python
+from alpasim_runtime.services.driver_service import DriverService
+
+driver = DriverService(grpc_stub, session_uuid)
+
+await driver.start_session(
+    random_seed=42,
+    available_cameras=cameras
+)
+
+# Submit observations
+await driver.submit_image(camera_id, timestamp, image_bytes)
+await driver.submit_egomotion(trajectory, dynamic_state)
+await driver.submit_route(waypoints, timestamp)
+
+# Get planned trajectory
+trajectory = await driver.drive(
+    time_now_us=current_time,
+    time_query_us=query_time
+)
+```
+
+### SensorsimService
+
+```python
+from alpasim_runtime.services.sensorsim_service import (
+    SensorsimService,
+    ImageFormat
+)
+
+sensorsim = SensorsimService(grpc_stub)
+
+# Render camera
+image_bytes = await sensorsim.render_rgb(
+    scene_id="scene_001",
+    camera_spec=camera_config,
+    frame_start_us=t_start,
+    frame_end_us=t_end,
+    sensor_pose=camera_pose,
+    dynamic_objects=traffic,
+    image_format=ImageFormat.JPEG,
+    quality=0.95
+)
+
+# Render LiDAR
+point_cloud = await sensorsim.render_lidar(
+    scene_id="scene_001",
+    lidar_type="PANDAR128",
+    frame_start_us=t_start,
+    frame_end_us=t_end,
+    sensor_pose=lidar_pose,
+    dynamic_objects=traffic
+)
+```
+
+## Utility Classes
+
+### RouteGenerator
+
+Generates route waypoints for the driver.
+
+```python
+from alpasim_runtime.route_generator import RouteGenerator
+from alpasim_runtime.config import RouteGeneratorType
+
+generator = RouteGenerator(
+    generator_type=RouteGeneratorType.FROM_GROUND_TRUTH,
+    ground_truth_trajectory=recorded_path,
+    vector_map=map_data
+)
+
+waypoints = generator.get_route_at_time(
+    timestamp_us=current_time,
+    current_pose=ego_pose
+)
+```
+
+### EgomotionNoiseModel
+
+Adds realistic sensor noise to localization.
+
+```python
+from alpasim_runtime.noise_models import EgomotionNoiseModel
+from alpasim_runtime.config import EgomotionNoiseModelConfig
+
+noise_model = EgomotionNoiseModel(
+    config=EgomotionNoiseModelConfig(
+        position_stddev_m=0.05,
+        rotation_stddev_rad=0.01,
+        velocity_stddev_mps=0.1
+    ),
+    random_seed=42
+)
+
+# Add noise to true state
+noisy_trajectory = noise_model.apply(
+    true_trajectory=ground_truth,
+    true_dynamic_state=true_state
+)
+```
+
+## Logging
+
+The runtime uses AlpaSim Simulation Log (ASL) format:
+
+```python
+from alpasim_utils.logs import LogWriter
+
+# Create log writer
+log_writer = LogWriter(output_path="rollout.asl")
+
+# Write entries during simulation
+await log_writer.write_entry(
+    timestamp_us=current_time,
+    ego_pose=pose,
+    actor_poses=traffic_poses,
+    camera_images=images
+)
+
+# Close log
+await log_writer.close()
+```
+
+Logs are written to the directory specified in the wizard configuration.
+
+## Example: Running a Rollout
+
+<CodeGroup>
+```python Simple Rollout
+import asyncio
+from alpasim_runtime.loop import UnboundRollout
+from alpasim_runtime.dispatcher import Dispatcher
+from alpasim_runtime.config import (
+    ScenarioConfig,
+    UserSimulatorConfig,
+    RuntimeCameraConfig
+)
+
+async def run_simulation():
+    # Configure scenario
+    scenario = ScenarioConfig(
+        scene_id="waymo_sf_001",
+        clip_start_time_us=0,
+        clip_end_time_us=10_000_000,
+        random_seed=42
+    )
+    
+    # Configure camera
+    camera = RuntimeCameraConfig(
+        logical_id="camera_front_wide_120fov",
+        height=720,
+        width=1280,
+        frame_interval_us=33000
+    )
+    
+    # Create unbound rollout
+    unbound = UnboundRollout.create(
+        scenario_config=scenario,
+        user_sim_config=user_config,
+        camera_configs=[camera],
+        vehicle_config=vehicle_config
+    )
+    
+    # Create dispatcher
+    dispatcher = Dispatcher.create(
+        network_config=network_config,
+        scene_artifacts=artifacts
+    )
+    
+    # Bind and run
+    bound = await unbound.bind(
+        dispatcher=dispatcher,
+        vector_map=map_data,
+        traffic_objects=traffic
+    )
+    
+    result = await bound.run()
+    print(f"Metrics: {result.aggregated_metrics}")
+
+asyncio.run(run_simulation())
+```
+
+```python Batch Processing
+import asyncio
+from pathlib import Path
+from alpasim_runtime.loop import UnboundRollout
+
+async def run_batch(scenario_configs):
+    # Create unbound rollouts
+    unbound_rollouts = [
+        UnboundRollout.create(
+            scenario_config=cfg,
+            user_sim_config=user_config,
+            camera_configs=cameras,
+            vehicle_config=vehicle_config
+        )
+        for cfg in scenario_configs
+    ]
+    
+    # Create shared dispatcher
+    dispatcher = Dispatcher.create(
+        network_config=network_config,
+        scene_artifacts=artifacts
+    )
+    
+    # Bind all rollouts
+    bound_rollouts = await asyncio.gather(*[
+        unbound.bind(dispatcher, map_data, traffic)
+        for unbound in unbound_rollouts
+    ])
+    
+    # Run in parallel
+    results = await asyncio.gather(*[
+        bound.run() for bound in bound_rollouts
+    ])
+    
+    return results
+```
+</CodeGroup>
+
+## Related
+
+- [Wizard CLI](/api/wizard) - Configures and launches runtime
+- [Evaluation Module](/api/eval) - Computes metrics from rollouts
+- [gRPC Services](/api/grpc/overview) - Service APIs used by runtime

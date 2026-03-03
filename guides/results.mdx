@@ -1,0 +1,520 @@
+---
+title: Understanding Simulation Results
+description: Guide to AlpaSim results directory structure, log formats, and output files
+---
+
+After running an AlpaSim simulation, results are organized in the directory specified by `wizard.log_dir`. This guide explains the structure and contents of simulation outputs.
+
+## Results Directory Structure
+
+A typical results directory contains:
+
+```
+tutorial/
+├── rollouts/           # Individual rollout data
+├── aggregate/          # Aggregated results across all rollouts
+├── telemetry/          # Performance profiling data
+├── driver/             # Driver service logs
+├── controller/         # Controller service logs
+├── eval/               # Evaluation outputs (deprecated location)
+├── metrics/            # Performance metrics
+├── txt-logs/           # Service text logs
+├── wizard-config.yaml  # Resolved configuration
+├── generated-user-config-0.yaml
+├── generated-network-config.yaml
+├── eval-config.yaml
+├── driver-config.yaml
+├── trafficsim-config.yaml
+└── run_metadata.yaml
+```
+
+## Rollouts Directory
+
+The `rollouts/` directory contains logs of simulation behavior for each rollout, organized by scene and batch:
+
+### Directory Organization
+
+```
+rollouts/
+├── {scenario.scene_id}/
+│   └── {batch_uuid}/
+│       ├── rollout.asl              # AlpaSim log format
+│       ├── rollout.rclog            # Runtime communication log
+│       ├── rollout_indexed/         # Indexed logs and videos
+│       │   ├── camera_front_tele_30fov.mp4
+│       │   ├── camera_front_wide_120fov.mp4
+│       │   ├── manifest.json
+│       │   ├── rclog-all.index
+│       │   └── rclog-all-indexed.log
+│       ├── metrics.parquet          # Per-rollout metrics
+│       ├── {clipgt_id}_{batch_id}_{rollout_id}.mp4  # Evaluation video
+│       └── _complete                # Completion marker
+```
+
+<Note>
+The subdivision into batches is historical and can be ignored for most purposes. Each batch typically contains a single rollout.
+</Note>
+
+### Example Structure
+
+<Accordion title="Real Directory Example">
+```
+rollouts/
+├── clipgt-f7020b3e-3d61-4cb6-b157-2f4aac1a7d8d/
+│   └── 86513b18-96c5-11ef-8b6f-b83fd26d88f0/
+│       ├── rollout.asl
+│       ├── rollout_indexed/
+│       │   ├── camera_front_tele_30fov.mp4
+│       │   ├── camera_front_wide_120fov.mp4
+│       │   ├── manifest.json
+│       │   ├── rclog-all.index
+│       │   └── rclog-all-indexed.log
+│       ├── rollout.rclog
+│       ├── metrics.parquet
+│       ├── clipgt-f7020b3e_0_86513b18.mp4
+│       └── _complete
+├── clipgt-fa369408-2787-41cb-b629-a7885d7c46e2/
+│   └── 8656ecb6-96c5-11ef-8b6f-b83fd26d88f0/
+│       ├── rollout.asl
+│       ├── rollout.rclog
+│       ├── metrics.parquet
+│       ├── clipgt-fa369408_0_8656ecb6.mp4
+│       └── _complete
+```
+</Accordion>
+
+### File Descriptions
+
+<Accordion title="rollout.asl">
+**ASL (AlpaSim Log) File**
+
+Records all messages exchanged within the simulation in size-delimited protobuf format.
+
+**Usage:**
+- Debugging simulator behavior
+- Replaying events
+- Detailed analysis of AV behavior
+- Computing metrics
+
+**Reading ASL Logs:**
+```bash
+uv run python -m alpasim_utils.print_asl --asl-path rollout.asl
+```
+
+See [ASL Log Format](#asl-log-format) for details.
+</Accordion>
+
+<Accordion title="metrics.parquet">
+**Per-Rollout Metrics**
+
+Contains evaluation metrics computed for this specific rollout in Parquet format.
+
+**Reading metrics:**
+```python
+import pandas as pd
+metrics = pd.read_parquet('rollout.parquet')
+print(metrics.columns)
+```
+
+**Common metrics:**
+- `collision_at_fault`
+- `collision_rear`
+- `offroad`
+- `dist_to_gt_trajectory`
+- `progress`
+- `duration_frac_20s`
+</Accordion>
+
+<Accordion title="Evaluation Videos">
+**{clipgt_id}_{batch_id}_{rollout_id}.mp4**
+
+Evaluation videos showing:
+- BEV map visualization
+- Camera feed
+- Metrics overlay
+- Or reasoning overlay (depending on `video_layouts` configuration)
+
+**Naming convention:**
+- `clipgt_id`: Scene identifier (e.g., `clipgt-f7020b3e`)
+- `batch_id`: Batch UUID or "0"
+- `rollout_id`: Rollout UUID
+
+**Video layouts:**
+- `DEFAULT`: BEV map + camera + metrics
+- `REASONING_OVERLAY`: First-person view + reasoning text + trajectory chart
+</Accordion>
+
+<Accordion title="_complete Marker">
+**Completion Marker File**
+
+Empty file created when a rollout finishes successfully.
+
+**Purpose:**
+- Tracks which rollouts completed
+- Used by autoresume feature
+- Incomplete rollout directories are removed on restart
+
+**Autoresume:**
+```yaml
+runtime:
+  enable_autoresume: true
+```
+
+With autoresume enabled, the simulator skips completed rollouts on restart.
+</Accordion>
+
+## Aggregate Directory
+
+The `aggregate/` directory contains results aggregated across all rollouts:
+
+### Structure
+
+```
+aggregate/
+├── metrics_results.txt         # Formatted table of driving scores
+├── metrics_results.png         # Visual summary of metrics
+├── metrics_unprocessed.parquet # Combined metrics from all rollouts
+└── videos/
+    ├── all/                    # All evaluation videos
+    │   └── clipgt-026d..._0.mp4
+    └── violations/             # Organized by violation type
+        ├── collision_at_fault/
+        ├── collision_rear/
+        ├── dist_to_gt_trajectory/
+        │   └── clipgt-026d..._0.mp4 -> ../../all/clipgt-026d..._0.mp4
+        └── offroad/
+```
+
+### Aggregated Metrics
+
+<Tabs>
+  <Tab title="metrics_results.txt">
+    **Formatted Text Table**
+    
+    Contains statistics (mean, std, min, max, quantiles) for each metric across all rollouts.
+    
+    **Example:**
+    ```
+    collision_at_fault: mean=0.05 std=0.22 min=0.00 max=1.00
+    dist_to_gt_trajectory: mean=2.3 std=1.5 min=0.1 max=8.4
+    duration_frac_20s: mean=0.95 std=0.15 min=0.45 max=1.00
+    ```
+    
+    **Interpretation:**
+    - `collision_at_fault: mean=0.05` → 5% of rollouts had at-fault collisions
+    - `dist_to_gt_trajectory: mean=2.3` → Average 2.3m deviation from GT path
+    - `duration_frac_20s: mean=0.95` → Average 95% of 20s completed
+  </Tab>
+  
+  <Tab title="metrics_results.png">
+    **Visual Summary**
+    
+    Graphical representation of driving quality metrics including:
+    - Distribution plots for key metrics
+    - Box plots showing variability
+    - Violation rate visualizations
+    
+    **Viewing:**
+    ```bash
+    open aggregate/metrics_results.png
+    ```
+  </Tab>
+  
+  <Tab title="metrics_unprocessed.parquet">
+    **Combined Raw Metrics**
+    
+    All metrics from individual rollouts combined into a single Parquet file.
+    
+    **Reading:**
+    ```python
+    import pandas as pd
+    metrics = pd.read_parquet('aggregate/metrics_unprocessed.parquet')
+    
+    # Filter failures
+    failures = metrics[metrics['collision_at_fault'] > 0]
+    
+    # Compute custom statistics
+    print(metrics.describe())
+    ```
+  </Tab>
+</Tabs>
+
+### Violation Videos
+
+Videos are organized by violation type using symbolic links:
+
+<Steps>
+  <Step title="All Videos">
+    `aggregate/videos/all/` contains all evaluation videos.
+  </Step>
+  
+  <Step title="Violation Categories">
+    `aggregate/videos/violations/` organizes videos by failure type:
+    - `collision_at_fault/`: At-fault collisions
+    - `collision_rear/`: Rear-end collisions
+    - `offroad/`: Off-road violations
+    - `dist_to_gt_trajectory/`: Large trajectory deviations
+  </Step>
+  
+  <Step title="Symbolic Links">
+    Videos in violation folders are symlinks to `all/`, allowing easy review of problematic scenarios without duplicating files.
+  </Step>
+</Steps>
+
+## Telemetry Directory
+
+The `telemetry/` directory contains performance profiling data:
+
+```
+telemetry/
+├── metrics.prom        # Prometheus metrics from simulation
+└── metrics_plot.png    # Performance visualization
+```
+
+<Accordion title="Performance Metrics">
+**metrics.prom** - Raw performance data in Prometheus format:
+- CPU utilization per service
+- GPU utilization and memory
+- RPC call durations and queue depths
+- Rollout and step timing
+
+**metrics_plot.png** - 3×3 grid visualization:
+
+**Row 1: RPC Performance**
+- RPC Duration histogram
+- RPC Blocking histogram
+- RPC Queue Depth histogram
+
+**Row 2: Simulation Timing**
+- Rollout Duration histogram
+- Step Duration histogram
+- Service Configuration table
+
+**Row 3: Resource Utilization**
+- CPU Utilization boxplots
+- GPU Utilization boxplots
+- GPU Memory boxplots
+
+**See:** [OPERATIONS.md - Performance Metrics](OPERATIONS.md#how-do-i-view-performance-metrics) for detailed interpretation.
+</Accordion>
+
+## ASL Log Format
+
+ASL (AlpaSim Log) files contain most messages exchanged during simulation as size-delimited protobuf messages.
+
+### Reading ASL Logs
+
+<Tabs>
+  <Tab title="Command Line">
+    Use the built-in ASL printer:
+    
+    ```bash
+    uv run python -m alpasim_utils.print_asl --asl-path rollout.asl
+    ```
+    
+    This displays all messages in human-readable format.
+  </Tab>
+  
+  <Tab title="Python API">
+    Read ASL logs programmatically:
+    
+    ```python
+    from alpasim_utils.logs import read_asl_log
+    
+    # Read all messages
+    messages = read_asl_log('rollout.asl')
+    
+    # Process messages
+    for msg in messages:
+        if msg.HasField('driver_request'):
+            print(f"Driver request at {msg.timestamp_us}")
+        elif msg.HasField('driver_response'):
+            print(f"Driver response: {msg.driver_response}")
+    ```
+  </Tab>
+  
+  <Tab title="Replay Example">
+    Replay stimuli for debugging:
+    
+    See [replay_logs_alpamodel.ipynb](https://github.com/NVlabs/alpasim/blob/main/src/runtime/notebooks/replay_logs_alpamodel.ipynb) for an example of:
+    - Reading ASL logs
+    - Extracting driver inputs
+    - Replaying on a driver instance
+    - Debugging with breakpoints
+  </Tab>
+</Tabs>
+
+### ASL Message Types
+
+<Accordion title="Common Message Types">
+**Driver Messages:**
+- `driver_request`: Input to driver (camera frames, egomotion, route)
+- `driver_response`: Output from driver (trajectory, reasoning)
+
+**Simulation Messages:**
+- `scenario_start`: Scenario initialization
+- `scenario_end`: Scenario completion
+- `step_start`: Simulation step beginning
+- `step_end`: Simulation step completion
+
+**Service Messages:**
+- `sensorsim_request/response`: Camera rendering
+- `physics_request/response`: Physics updates
+- `controller_request/response`: Vehicle control
+</Accordion>
+
+### Use Cases
+
+<Steps>
+  <Step title="Debugging Simulator">
+    ASL logs show exact sequence of events:
+    ```bash
+    uv run python -m alpasim_utils.print_asl --asl-path rollout.asl | less
+    ```
+  </Step>
+  
+  <Step title="Analyzing Behavior">
+    Extract specific data for analysis:
+    ```python
+    # Find all collisions
+    collisions = [msg for msg in messages if msg.HasField('collision_event')]
+    ```
+  </Step>
+  
+  <Step title="Reproducing Issues">
+    Replay exact inputs to reproduce bugs:
+    - Extract driver requests from ASL
+    - Feed to driver with debugger attached
+    - Step through problematic scenarios
+  </Step>
+</Steps>
+
+## Configuration Files
+
+The results directory includes all configuration used for the run:
+
+<Accordion title="wizard-config.yaml">
+**Resolved Wizard Configuration**
+
+Contains the complete configuration after applying Hydra inheritance.
+
+**Usage:** Debugging configuration issues, reproducing runs
+
+```bash
+cat wizard-config.yaml
+```
+</Accordion>
+
+<Accordion title="generated-user-config-{ARRAY_ID}.yaml">
+**Expanded Simulation Configuration**
+
+Expanded version of the simulation config, possibly split into chunks when simulating on multiple nodes.
+
+**Array jobs:** Multiple files (0, 1, 2, ...) for distributed execution
+</Accordion>
+
+<Accordion title="generated-network-config.yaml">
+**Network Configuration**
+
+Describes which services listen on which ports during simulation.
+
+**Usage:** Debugging network issues, service connectivity
+</Accordion>
+
+<Accordion title="eval-config.yaml">
+**Evaluation Configuration**
+
+Configuration used for metrics computation and video generation.
+</Accordion>
+
+<Accordion title="driver-config.yaml">
+**Driver Configuration**
+
+Driver-specific settings including model paths and inference parameters.
+</Accordion>
+
+## Service Logs
+
+Service-specific logs are organized in dedicated directories:
+
+### Driver Logs
+
+```
+driver/
+└── vam-driver.yaml  # Driver service configuration
+```
+
+Useful for debugging policy-internal problems.
+
+### Controller Logs
+
+```
+controller/
+└── [log files]      # Controller service logs
+```
+
+### Text Logs
+
+```
+txt-logs/
+├── driver-0.log
+├── runtime-0.log
+├── sensorsim-0.log
+├── physics-0.log
+└── controller-0.log
+```
+
+Stdout/stderr from each microservice, useful for debugging errors.
+
+## Best Practices
+
+<Warning>
+**Important Result Directories**:
+
+For most use cases, only `rollouts/` and `aggregate/` are needed:
+- `rollouts/`: Individual rollout analysis
+- `aggregate/`: Overall performance metrics
+
+Other directories are for debugging and performance tuning.
+</Warning>
+
+<Note>
+**Storage Management**:
+
+- ASL logs can be large (100s of MB per rollout)
+- Videos consume significant disk space
+- Consider `eval.video.render_video=false` for large-scale runs
+- Use `eval.video.render_every_nth_frame` to reduce video size
+</Note>
+
+<Steps>
+  <Step title="Quick Results Check">
+    Start with aggregated metrics:
+    ```bash
+    cat aggregate/metrics_results.txt
+    open aggregate/metrics_results.png
+    ```
+  </Step>
+  
+  <Step title="Review Failures">
+    Check violation videos:
+    ```bash
+    ls aggregate/videos/violations/collision_at_fault/
+    open aggregate/videos/violations/collision_at_fault/*.mp4
+    ```
+  </Step>
+  
+  <Step title="Deep Dive Analysis">
+    Examine individual rollouts:
+    ```bash
+    # Find interesting rollout
+    cd rollouts/clipgt-f7020b3e.../86513b18.../
+    
+    # View metrics
+    python -c "import pandas as pd; print(pd.read_parquet('metrics.parquet'))"
+    
+    # Inspect ASL log
+    uv run python -m alpasim_utils.print_asl --asl-path rollout.asl
+    ```
+  </Step>
+</Steps>

@@ -1,0 +1,227 @@
+---
+title: Code Standards and Conventions
+description: Coding standards, style guides, and naming conventions for AlpaSim
+---
+
+This guide outlines the coding standards and conventions used in the AlpaSim repository.
+
+## Linting and Formatting
+
+Linting is performed using [pre-commit](https://pre-commit.com/) with [black](https://black.readthedocs.io/en/stable/).
+
+### Setup
+
+To set up pre-commit hooks locally:
+
+```bash
+# Install pre-commit (e.g., using pip)
+pip install pre-commit
+
+# Install hooks
+pre-commit install
+
+# Run manually
+pre-commit run --all-files
+```
+
+## Python Style Guide
+
+### General Guidelines
+
+- **Python version**: 3.12+
+- **Indentation**: 4 spaces (no tabs)
+- **Encoding**: UTF-8 ASCII unless data demands otherwise
+- **Auto-format**: Use `black` for code formatting
+- **Import sorting**: Automatically sorted by pre-commit hooks
+- **Linting**: Use `ruff` to satisfy lint warnings before pushing
+
+### PEP 8 Compliance
+
+Generally, follow the [PEP 8 guidelines for naming conventions](https://peps.python.org/pep-0008/#naming-conventions).
+
+<Note>
+Due to the subject matter in simulation, there are additional conventions that help with readability and prevent costly misunderstandings.
+</Note>
+
+## Naming Conventions
+
+### Coordinate Systems
+
+There are four primary coordinate systems used in simulations:
+
+<Accordion title="Local Frame">
+An inertial frame, fixed on a per-scenario basis, which represents an ENU frame defined by NRE.
+</Accordion>
+
+<Accordion title="Rig Frame">
+A body-fixed frame with the following properties:
+- The x-axis points forward
+- The y-axis points to the left when looking forward
+- The z-axis points up
+- The origin is at the center of the rear axle, projected onto the ground plane
+</Accordion>
+
+<Accordion title="AABB Frame">
+Axis-Aligned Bounding Box frame: a body-fixed frame, defined with the same orientation as the rig definition, but the origin at the center of the object bounding box.
+</Accordion>
+
+<Accordion title="ECEF Frame">
+Earth-Centered, Earth-Fixed frame: an inertial global frame, based on WGS84.
+</Accordion>
+
+### Transforms and Coordinate Frames
+
+**Definition**: An **active transform** moves or rotates an object within a fixed coordinate frame, while a **passive transform** changes the coordinate frame itself in which the object is described.
+
+<Note>
+The position of `B` in the coordinate frame of `A` is the same as the **active transform** from `A` to `B` (i.e., `A->B`).
+
+To change notation from coordinate frame `A` to `B`, use the **passive transform** `B->A = (A->B).inverse()`.
+</Note>
+
+### Vectors, Rotations, and Poses
+
+Vectors representing positions, velocities, and accelerations should be named according to the frame in which they are defined.
+
+#### Position Naming Examples
+
+```python
+# Bad - unclear reference frame and object
+position = np.array([1, 2, 3])
+position_local = np.array([1, 2, 3])
+
+# Good - clear object and frame
+position_object_local = np.array([1, 2, 3])
+position_object_in_local = np.array([1, 2, 3])
+object_position_local = np.array([1, 2, 3])
+```
+
+#### Relative Position Examples
+
+```python
+# Bad - reference frame unclear
+position_front_axle = np.array([3, 0.0, 0.1])
+obj1_to_obj2 = np.array([10.0, 20.0, 0.0])
+
+# Good - explicit frame reference
+position_front_axle_in_rig = np.array([3, 0.0, 0.1])
+obj1_to_obj2_in_aabb = np.array([10.0, 20.0, 0.0])
+```
+
+#### Rotation and Pose Examples
+
+<Warning>
+Rotations and poses should always follow an **active convention**: the "A to B" transform operated on some quantity should take that quantity in frame A and "move" it using the "A to B" transform.
+</Warning>
+
+```python
+# Bad - unclear frames
+rotation = Quaternion(...)
+pose = Pose(...)
+
+# Good - explicit frame transformation
+rotation_local_to_rig = Quaternion(...)
+pose_rig_to_aabb = Pose(...)
+transform_rig_to_aabb = Pose(...)  # also acceptable
+```
+
+#### Complete Example
+
+```python
+# Positions
+rig_to_aabb_in_local = np.array(...)
+position_rig_local = np.array(...)
+position_aabb_local = position_rig_local + rig_to_aabb_in_local
+
+# Poses
+pose_ego_rig_to_aabb = QVec(vec3=..., quat=...)
+pose_local_to_ego_rig = QVec(vec3=..., quat=...)
+position_ego_aabb_local = (pose_local_to_ego_rig @ pose_ego_rig_to_aabb).vec3
+```
+
+## Testing Guidelines
+
+### Test Organization
+
+- Place tests next to their module under `src/<module>/tests`
+- Name test files `test_*.py`
+- Default pytest config skips `@pytest.mark.manual` suites
+- Mark long-running or cluster-dependent cases accordingly
+
+### Best Practices
+
+<Steps>
+  <Step title="Use fixtures">
+    Use fixtures over hard-coded paths
+  </Step>
+  <Step title="Reference sample data">
+    When acting on sample assets, reference `data/` or create temporary files
+  </Step>
+  <Step title="Isolate async tests">
+    Extend async tests with `pytest-asyncio`
+  </Step>
+  <Step title="Avoid network side-effects">
+    Keep gRPC client stubs isolated to avoid network side-effects
+  </Step>
+</Steps>
+
+### Running Tests
+
+```bash
+# Run fast test bundle
+uv run pytest
+
+# Target a specific module
+uv run pytest src/runtime/tests
+```
+
+## Import Guidelines
+
+<Warning>
+**Do not** use `TYPE_CHECKING` to conditionally import packages for type checking.
+
+**Do not** use on-demand or runtime imports; always place all imports at the top of the file.
+</Warning>
+
+## Documentation Guidelines
+
+- Document complex flows with concise comments
+- Prefer dataclasses and type hints for public APIs
+- Keep documentation close to the code it describes
+
+## Commit Message Format
+
+- Keep commits focused and imperative (e.g., `runtime: guard invalid rig transforms`)
+- Avoid `wip` in final history
+- Reference issue IDs when applicable
+
+## Project Structure
+
+Core packages live in `src/<module>`. Each module (e.g., `runtime`, `wizard`, `grpc`, `utils`, `ddb`, `physics`, `avmf`, `tools`, `controller`, `driver`, `eval`) bundles its code with a colocated `tests` folder.
+
+```
+src/
+  <module>/
+    __init__.py
+    <source_files>.py
+    tests/
+      test_*.py
+```
+
+## Static Type Checking
+
+```bash
+# Type-check runtime-heavy code
+uv run mypy src/runtime
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Contributing Guide" icon="code-branch" href="/community/contributing">
+    Learn how to contribute to AlpaSim
+  </Card>
+  <Card title="Maintainers" icon="users" href="/community/maintainers">
+    View project maintainers and roles
+  </Card>
+</CardGroup>

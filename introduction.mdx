@@ -1,0 +1,97 @@
+---
+title: 'Introduction to AlpaSim'
+description: 'A modular, lightweight, and data-driven research simulator for autonomous driving'
+---
+
+AlpaSim is an open-source autonomous vehicle simulation platform designed specifically for research and development. It allows you to test end-to-end AV policies in a closed-loop setting by simulating realistic sensor data, vehicle dynamics, and traffic scenarios within a modular and extensible testbed.
+
+## Use cases
+
+AlpaSim is suitable for a wide range of autonomous driving research:
+
+<CardGroup cols={2}>
+  <Card title="Algorithm validation" icon="flask">
+    Test new autonomous driving algorithms in realistic environments
+  </Card>
+  <Card title="Safety analysis" icon="shield-check">
+    Evaluate vehicle behavior in edge cases and challenging scenarios
+  </Card>
+  <Card title="Performance benchmarking" icon="chart-line">
+    Compare different models and configurations with regression testing
+  </Card>
+  <Card title="Debugging" icon="bug">
+    Understand and debug complex autonomous driving behaviors
+  </Card>
+</CardGroup>
+
+## Core principles
+
+AlpaSim is built on three foundational principles:
+
+### Sensor fidelity
+
+- **Neural rendering integration**: NuRec integration for photorealistic sensor simulation of novel views
+- **High-fidelity camera feeds**: Configurable field-of-view, resolution, and frame rates
+- **Realistic conditions**: Accurate sensor noise and environmental conditions
+
+### Research hackability
+
+- **Python-based implementation**: Built for rapid prototyping and experimentation
+- **Modular gRPC interface**: Swap out components with custom implementations
+- **Extensive configuration**: Rich configuration options and debugging tools
+
+### Horizontal scalability
+
+- **Microservices architecture**: Distributed computing across multiple services
+- **Individual component scaling**: Optimal load balancing per service
+- **Multi-node deployments**: Support for distributed execution
+
+## Architecture overview
+
+AlpaSim consists of multiple networked microservices that work together to create a complete simulation environment:
+
+- **Renderer**: Provides observed video frames using neural rendering
+- **Physics simulation**: Constrains actors to the road surface
+- **Runtime**: Orchestrates the simulation and coordinates services
+- **Controller**: Manages egomotion history
+- **Driver**: Implements the driving policy
+- **Traffic simulation**: Simulates other vehicles and traffic
+
+The runtime requests observed video frames from the renderer and egomotion history from the controller, communicates with the physics microservice, and provides information to the driver, receiving driving decisions in return to close the loop.
+
+## Supported driving policies
+
+AlpaSim currently supports the following driver policies:
+
+- **[Alpamayo-R1](https://github.com/NVlabs/alpamayo)**: NVIDIA Alpamayo, a VLA driving policy with chain-of-causation reasoning
+- **[VaVAM](https://github.com/valeoai/VideoActionModel)**: An autoregressive video-action driving policy
+- **[Transfuser](https://github.com/autonomousvision/lead)**: Latent TransFuser v6 (LTFv6) policy developed for NAVSIM (provisional)
+
+<Note>
+Additional model support is coming soon. Community contributions are appreciated.
+</Note>
+
+## Data and scenes
+
+AlpaSim uses NuRec reconstructions of real-world driving logs as simulation scenes. These provide photorealistic environments for testing autonomous driving systems.
+
+**Sample data**: Publicly available scenes are hosted on [Hugging Face](https://huggingface.co/datasets/nvidia/PhysicalAI-Autonomous-Vehicles-NuRec) and include the 25.07 release dataset with over 900 validated scenes.
+
+## Next steps
+
+<CardGroup cols={3}>
+  <Card title="Quick start" icon="rocket" href="/quickstart">
+    Run your first simulation in minutes
+  </Card>
+  <Card title="Onboarding" icon="download" href="/onboarding">
+    Set up dependencies and environment
+  </Card>
+  <Card title="System design" icon="sitemap" href="/design">
+    Learn about the technical architecture
+  </Card>
+</CardGroup>
+
+<div align="center">
+  <strong>Built for researchers, by researchers</strong><br />
+  <em>Accelerating autonomous vehicle development through realistic simulation</em>
+</div>

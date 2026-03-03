@@ -1,0 +1,200 @@
+---
+title: Project Maintainers
+description: AlpaSim project maintainers, contributors, and roles
+---
+
+This document provides an introduction to project management and an overview of processes for the AlpaSim project.
+
+## Project Overview
+
+### Philosophy
+
+AlpaSim is meant to be an **open-source, best-effort research project**. The processes for maintaining the project are designed to allow for rapid development and iteration while maintaining a reasonable level of quality.
+
+### Constraints
+
+The project is maintained by a small team with limited time and resources. Therefore, the processes are designed to minimize overhead and maximize efficiency.
+
+## Leadership
+
+<CardGroup cols={1}>
+  <Card title="Project Lead" icon="user-tie">
+    **Maximilian Igl**
+    
+    Program Manager/PIC, Primary Researcher, and Owner
+  </Card>
+</CardGroup>
+
+## Security
+
+<Card title="PLC Security PIC" icon="shield">
+  **Michael Watson**
+</Card>
+
+## Core Team
+
+### Technical Leadership
+
+<Accordion title="Tech Leads">
+- **Michal Tyszkiewicz**
+- **Michael Watson**
+</Accordion>
+
+<Accordion title="Senior Management">
+- **Sanja Fidler**
+- **Zan Gojcic**
+- **Boris Ivanovic**
+- **Marco Pavone**
+</Accordion>
+
+### Project Management
+
+<Accordion title="Product Manager">
+- **Matt Cragun**
+</Accordion>
+
+## Contributors by Area
+
+### Architecture and Infrastructure
+
+<Accordion title="Architecture Design & Networking">
+- **Michal Tyszkiewicz**
+</Accordion>
+
+<Accordion title="Infrastructure & Wizard">
+- **Maximilian Igl**
+- **Aaron Smith**
+- **Michal Tyszkiewicz**
+- **Michael Watson**
+- **Qi Wu** (SLURM deployment)
+- **Le Zhang** (Data management)
+</Accordion>
+
+<Accordion title="Runtime">
+- **Maximilian Igl**
+- **Aaron Smith**
+- **Ellie Tanimura**
+- **Michal Tyszkiewicz**
+- **Michael Watson**
+</Accordion>
+
+<Accordion title="CICD">
+- **Maximilian Igl**
+- **Aaron Smith**
+</Accordion>
+
+### Open Source and Quality
+
+<Accordion title="Open Sourcing">
+- **Guillermo Garcia Cobo**
+- **Maximilian Igl**
+- **Peter Karkus**
+- **Ellie Tanimura**
+- **Michael Watson**
+</Accordion>
+
+<Accordion title="Testing & Debugging">
+- **Guillermo Garcia Cobo**
+- **Peter Karkus**
+- **Ellie Tanimura**
+</Accordion>
+
+### Data and Pipeline
+
+<Accordion title="Data Pipeline">
+- **Riccardo de Lutio**
+- **Janick Martinez**
+- **Le Zhang**
+</Accordion>
+
+### Service Modules
+
+<Accordion title="Driver Integration">
+- **Maximilian Igl**
+- **Peter Karkus**
+- **Michal Tyszkiewicz**
+</Accordion>
+
+<Accordion title="Evaluation">
+- **Yulong Cao**
+- **Maximilian Igl**
+</Accordion>
+
+<Accordion title="Controller">
+- **Michael Watson**
+</Accordion>
+
+<Accordion title="Physics">
+- **Riccardo de Lutio**
+</Accordion>
+
+<Accordion title="Trafficsim">
+- **Maximilian Igl**
+- **Boris Ivanovic**
+</Accordion>
+
+## Additional Acknowledgements
+
+<Note>
+Additional contributions from:
+- **Fabian Barajas**
+- **Kashyap Chitta**
+- **Ankit Gupta**
+- **Laura Leal-Taixe**
+- **Nicole Yang**
+</Note>
+
+## Software Development Process
+
+### Branching Strategy
+
+<Steps>
+  <Step title="Main Branch">
+    **`main`** - Primary branch, requires fast-forward merges only
+  </Step>
+  <Step title="Feature Branches">
+    Created from `main` for new work
+  </Step>
+  <Step title="Branch Naming">
+    Use descriptive names (e.g., `dev/<username>/<feature-name>`)
+  </Step>
+</Steps>
+
+### Rebasing
+
+This repository requires **fast-forward merges only** to maintain a linear commit history. If your branch falls behind `main`, you must rebase.
+
+<Warning>
+Force pushes are expected and necessary when rebasing due to the linear history requirement.
+</Warning>
+
+### Merge Request Process
+
+Merge/Pull requests are required for all changes to the codebase. Templates are provided to ensure consistency and completeness.
+
+## Release Process
+
+Versioning is automated by the CICD pipeline to ensure that versions remain uniquely identified. There is no plan to develop process for qualification/certification of releases at this time.
+
+<Note>
+Updates will be rolled out continuously via the `main` branch.
+</Note>
+
+## Contact
+
+For questions about project governance or to report issues, please:
+
+- Open an issue on the GitHub repository
+- Contact the project lead: **Maximilian Igl**
+- For security concerns, see the [Security Policy](/community/security)
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Contributing" icon="code-branch" href="/community/contributing">
+    Learn how to contribute to AlpaSim
+  </Card>
+  <Card title="Security" icon="shield" href="/community/security">
+    Report security vulnerabilities
+  </Card>
+</CardGroup>

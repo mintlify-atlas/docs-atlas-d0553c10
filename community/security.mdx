@@ -1,0 +1,140 @@
+---
+title: Security Policy
+description: How to report security vulnerabilities in AlpaSim
+---
+
+NVIDIA is dedicated to the security and trust of our software products and services, including all source code repositories managed through our organization.
+
+<Warning>
+**Do not report security vulnerabilities through GitHub.**
+
+Please use the appropriate contact points outlined below.
+</Warning>
+
+## Reporting a Security Vulnerability
+
+To report a potential security vulnerability in any NVIDIA product:
+
+### Contact Methods
+
+<CardGroup cols={2}>
+  <Card title="Web Form" icon="globe">
+    [Security Vulnerability Submission Form](https://www.nvidia.com/object/submit-security-vulnerability.html)
+  </Card>
+  <Card title="Email" icon="envelope">
+    **psirt@nvidia.com**
+    
+    [Download NVIDIA PGP Key](https://www.nvidia.com/en-us/security/pgp-key) for secure communication
+  </Card>
+</CardGroup>
+
+## Information to Include
+
+When reporting a security issue, please include the following information:
+
+<Steps>
+  <Step title="Product Information">
+    Product/Driver name and version/branch that contains the vulnerability
+  </Step>
+  <Step title="Vulnerability Type">
+    Type of vulnerability (code execution, denial of service, buffer overflow, etc.)
+  </Step>
+  <Step title="Reproduction Steps">
+    Instructions to reproduce the vulnerability
+  </Step>
+  <Step title="Proof of Concept">
+    Proof-of-concept or exploit code (if available)
+  </Step>
+  <Step title="Impact Assessment">
+    Potential impact of the vulnerability, including how an attacker could exploit it
+  </Step>
+</Steps>
+
+### Example Report Template
+
+```markdown
+**Product/Version**: AlpaSim v2.3.26
+
+**Vulnerability Type**: [e.g., Code Execution, DoS, Buffer Overflow]
+
+**Description**: [Detailed description of the vulnerability]
+
+**Reproduction Steps**:
+1. [Step 1]
+2. [Step 2]
+3. [Step 3]
+
+**Proof of Concept**:
+[Code or detailed exploit steps]
+
+**Impact**:
+[Description of potential impact and exploitation methods]
+
+**Suggested Fix** (optional):
+[Your suggestions for addressing the vulnerability]
+```
+
+## Secure Email Communication
+
+We encourage you to use PGP encryption for secure email communication:
+
+<Card title="NVIDIA PGP Key" icon="key">
+  Download the [NVIDIA public PGP Key](https://www.nvidia.com/en-us/security/pgp-key) for encrypted communication with PSIRT.
+</Card>
+
+## Coordinated Vulnerability Disclosure
+
+<Note>
+While NVIDIA currently does not have a bug bounty program, we do offer acknowledgement when an externally reported security issue is addressed under our coordinated vulnerability disclosure policy.
+</Note>
+
+For more information, visit the [Product Security Incident Response Team (PSIRT)](https://www.nvidia.com/en-us/security/psirt-policies/) policies page.
+
+## Response Process
+
+<Accordion title="Initial Response">
+You will receive an acknowledgement of your report within a reasonable timeframe.
+</Accordion>
+
+<Accordion title="Investigation">
+Our security team will investigate the reported vulnerability and determine its severity and impact.
+</Accordion>
+
+<Accordion title="Resolution">
+If the vulnerability is confirmed, we will work on a fix and coordinate the disclosure timeline with you.
+</Accordion>
+
+<Accordion title="Acknowledgement">
+You may be acknowledged in our security advisories if you choose (anonymous reports are also accepted).
+</Accordion>
+
+## NVIDIA Product Security
+
+For all security-related concerns, please visit:
+
+<Card title="NVIDIA Security Portal" icon="shield" href="https://www.nvidia.com/en-us/security">
+  Visit the NVIDIA Product Security portal for security advisories, policies, and resources.
+</Card>
+
+## Security Best Practices
+
+When using AlpaSim, consider the following security best practices:
+
+<Warning>
+- Never commit sensitive credentials or API keys to the repository
+- Use environment variables for secrets (e.g., `HF_TOKEN`)
+- Keep dependencies up to date
+- Review security advisories regularly
+- Use secure communication channels for sensitive data
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Contributing" icon="code-branch" href="/community/contributing">
+    Learn how to contribute securely
+  </Card>
+  <Card title="License" icon="scale-balanced" href="/community/license">
+    View license information
+  </Card>
+</CardGroup>

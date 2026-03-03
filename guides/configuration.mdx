@@ -1,0 +1,411 @@
+---
+title: AlpaSim Wizard Configuration
+description: Understanding and customizing AlpaSim configuration with Hydra
+---
+
+AlpaSim wizard is configured via [Hydra](https://hydra.cc/docs/intro/) and takes in a `.yaml` configuration file and arbitrary command line overrides. This provides a flexible and powerful way to customize every aspect of the simulation.
+
+## Configuration Files
+
+Example config files are located in `src/wizard/configs/`. The primary configuration file is `base_config.yaml`, which has detailed comments on all configuration fields.
+
+<Note>
+Recommended reading: [base_config.yaml](https://github.com/NVlabs/alpasim/blob/main/src/wizard/configs/base_config.yaml) for comprehensive documentation of all available options.
+</Note>
+
+## Configuration with Hydra
+
+Hydra enables hierarchical configuration composition with command-line overrides. The configuration inheritance order is defined in the `defaults` section:
+
+```yaml
+defaults:
+  - config_schema      # Python-defined base skeleton
+  - _self_             # This file applied on top
+  - stable_manifest/oss
+```
+
+### Command Line Overrides
+
+You can override any configuration parameter via command line:
+
+```bash
+alpasim_wizard +deploy=local \
+  wizard.log_dir=$PWD/tutorial \
+  runtime.default_scenario_parameters.n_rollouts=8
+```
+
+<Tabs>
+  <Tab title="Basic Syntax">
+    **Simple value override:**
+    ```bash
+    parameter.name=value
+    ```
+    
+    **Nested parameters:**
+    ```bash
+    parent.child.parameter=value
+    ```
+    
+    **List values:**
+    ```bash
+    parameter=[value1,value2,value3]
+    ```
+  </Tab>
+  
+  <Tab title="Advanced Patterns">
+    **Add new config group:**
+    ```bash
+    +deploy=local
+    ```
+    
+    **Remove config:**
+    ```bash
+    ~parameter.name
+    ```
+    
+    **Multiple overrides:**
+    ```bash
+    alpasim_wizard +deploy=local \
+      wizard.log_dir=$PWD/run1 \
+      runtime.nr_workers=4 \
+      runtime.default_scenario_parameters.n_sim_steps=200
+    ```
+  </Tab>
+</Tabs>
+
+## Runtime Specification
+
+Under the top-level `runtime` item in `base_config.yaml`, we describe the details of the simulation to be performed (as opposed to deployment settings under `wizard.*` and `services.*`).
+
+### Key Configuration Fields
+
+<Accordion title="save_dir">
+The directory where to save `.asl` logs. It needs to be kept in sync with wizard mount points.
+
+```yaml
+runtime:
+  save_dir: /mnt/log_dir
+```
+</Accordion>
+
+<Accordion title="endpoints">
+Used to configure simulator scaling properties, including concurrent rollouts per service.
+
+```yaml
+runtime:
+  endpoints:
+    sensorsim:
+      n_concurrent_rollouts: 2
+    driver:
+      n_concurrent_rollouts: 14
+    physics:
+      n_concurrent_rollouts: 14
+      skip: false
+    controller:
+      n_concurrent_rollouts: 14
+      skip: false
+    trafficsim:
+      n_concurrent_rollouts: 14
+      skip: true  # Not included yet
+```
+
+**Concurrency parameters:**
+- `n_concurrent_rollouts`: How many rollouts each service replica can process simultaneously
+- `skip`: Whether to disable this service
+</Accordion>
+
+<Accordion title="default_scenario_parameters">
+Specify all simulation parameters including timing, cameras, vehicle configuration, and more.
+
+```yaml
+runtime:
+  default_scenario_parameters:
+    n_sim_steps: 200              # Simulation steps per rollout
+    n_rollouts: 1                 # Rollouts per scenario
+    force_gt_duration_us: 1_700_000  # 1.7 seconds
+    egopose_interval_us: 100_000  # GPS/pose update rate
+    control_timestep_us: 100_000  # Inference frequency
+    time_start_offset_us: 300_000 # Initial offset
+```
+</Accordion>
+
+## Scenario Parameters
+
+The `default_scenario_parameters` section controls the core simulation behavior:
+
+### Timing Configuration
+
+<CodeGroup>
+```yaml Timing Parameters
+runtime:
+  default_scenario_parameters:
+    # Simulation duration
+    n_sim_steps: 200              # Number of steps to simulate
+    n_rollouts: 1                 # Rollouts per scenario
+    
+    # Timing synchronization (all in microseconds)
+    control_timestep_us: 100_000  # 10 Hz inference
+    egopose_interval_us: 100_000  # Must match control_timestep_us
+    time_start_offset_us: 300_000 # Must be multiple of control_timestep_us
+    
+    # Ground truth forcing
+    force_gt_duration_us: 1_700_000  # 1.7 seconds
+```
+
+```bash Command Line Example
+alpasim_wizard +deploy=local \
+  wizard.log_dir=$PWD/tutorial \
+  runtime.default_scenario_parameters.n_rollouts=8 \
+  runtime.default_scenario_parameters.n_sim_steps=300
+```
+</CodeGroup>
+
+<Warning>
+**Timing Synchronization**: `egopose_interval_us`, `control_timestep_us`, and camera `frame_interval_us` must be synchronized. The `time_start_offset_us` must be a multiple of `control_timestep_us`.
+</Warning>
+
+### Camera Configuration
+
+```yaml
+runtime:
+  default_scenario_parameters:
+    cameras:
+      - height: 320
+        width: 512
+        logical_id: camera_front_wide_120fov
+        frame_interval_us: 100_000    # Must sync with control_timestep_us
+        shutter_duration_us: 30_000
+        first_frame_offset_us: -30_000
+      
+      - height: 320
+        width: 512
+        logical_id: camera_front_tele_30fov
+        frame_interval_us: 100_000
+        shutter_duration_us: 30_000
+        first_frame_offset_us: -30_000
+```
+
+<Note>
+If you change `frame_interval_us`, consider adjusting `driver.inference.Cframes_subsample` to maintain consistent behavior.
+</Note>
+
+### Physics and Vehicle
+
+```yaml
+runtime:
+  default_scenario_parameters:
+    # Physics update mode
+    physics_update_mode: "EGO_ONLY"  # or "NONE" for log replay
+    
+    # Vehicle configuration
+    vehicle: null  # Use values from .usdz file
+    
+    # Ego hood configuration
+    ego_mask_rig_config_id: "hyperion_8_1"
+    
+    # Traffic filtering
+    min_traffic_duration_us: 3_000_000  # Ignore actors shorter than 3s
+```
+
+### Navigation and Route
+
+```yaml
+runtime:
+  default_scenario_parameters:
+    # Route generation type
+    route_generator_type: "MAP"  # or "RECORDED"
+    
+    # Ground truth recording
+    send_recording_ground_truth: false
+```
+
+## Evaluation Configuration
+
+The `eval` section controls metrics computation and video generation:
+
+### Video Configuration
+
+<CodeGroup>
+```yaml Video Settings
+eval:
+  video:
+    render_video: true
+    video_layouts: ["DEFAULT"]  # or ["REASONING_OVERLAY"] or both
+    camera_id_to_render: camera_front_wide_120fov
+    reasoning_text_refresh_interval_s: 1.0
+    overlay_plans_on_camera: true
+    render_every_nth_frame: 1
+    generate_combined_video: false
+    combined_video_speed_factor: 0.33
+```
+
+```bash Override Example
+alpasim_wizard +deploy=local \
+  wizard.log_dir=$PWD/tutorial \
+  driver=[ar1,ar1_runtime_configs] \
+  eval.video.video_layouts=[REASONING_OVERLAY]
+```
+</CodeGroup>
+
+### Metrics Configuration
+
+```yaml
+eval:
+  scorers:
+    min_ade:
+      time_deltas: [0.5, 1.0, 2.5, 5.0]
+      incl_z: false
+      target: GT
+    
+    plan_deviation:
+      incl_z: false
+      avg_decay_rate: 0.1
+      min_timesteps: 5
+    
+    image:
+      camera_logical_id: camera_front_wide_120fov
+  
+  aggregation_modifiers:
+    max_dist_to_gt_trajectory: 4.0
+```
+
+### Map Visualization
+
+```yaml
+eval:
+  video:
+    map_video:
+      map_radius_m: 20
+      ego_loc: BOTTOM_CENTER
+      rotate_map_to_ego: true
+      map_elements_to_plot:
+        - ROAD_LANE_CENTER
+        - ROAD_LANE_LEFT_EDGE
+        - ROAD_LANE_RIGHT_EDGE
+        - ROAD_EDGE
+        - STOP_LINE
+        - GT_LINESTRING
+        - EGO_GT_GHOST_POLYGON
+        - DRIVER_RESPONSES
+        - ROUTE
+        - AGENTS
+```
+
+## Service Configuration
+
+The `services.*` section defines the individual microservice components:
+
+<Steps>
+  <Step title="Image Selection">
+    Each service specifies its Docker image:
+    
+    ```yaml
+    services:
+      driver:
+        image: ???  # Defined in stable_manifest
+    ```
+  </Step>
+  
+  <Step title="Volume Mounts">
+    Mount host directories into containers:
+    
+    ```yaml
+    services:
+      driver:
+        volumes:
+          - "${defines.drivers}:/mnt/drivers"
+          - "${wizard.log_dir}:/mnt/output"
+          - "${repo-relative:'src'}:/repo/src"
+    ```
+  </Step>
+  
+  <Step title="GPU Allocation">
+    Assign GPUs to services:
+    
+    ```yaml
+    services:
+      driver:
+        gpus: [0]
+        replicas_per_container: 1
+    ```
+  </Step>
+</Steps>
+
+## Wizard Configuration
+
+The `wizard.*` section defines global properties:
+
+```yaml
+wizard:
+  # Run identification
+  run_name: null  # Auto-generated if not set
+  
+  # Execution method
+  run_method: "DOCKER_COMPOSE"  # or "SLURM", "DOCKER"
+  
+  # Output location (REQUIRED)
+  log_dir: ???  # Must be overridden via command line
+  
+  # Network configuration
+  baseport: 6000  # Services use ports 6000, 6001, 6002, ...
+  
+  # Validation
+  validate_mount_points: true
+  
+  # Services to run
+  run_sim_services:
+    - driver
+    - sensorsim
+    - physics
+    - trafficsim
+    - controller
+    - runtime
+  
+  # Logging
+  log_level: INFO  # DEBUG, INFO, WARNING, ERROR
+```
+
+## Viewing Configuration
+
+After running the wizard, you can inspect the resolved configuration:
+
+<Accordion title="Configuration Files">
+**wizard-config.yaml**: Contains the config the wizard used after applying Hydra inheritance. Useful for debugging configuration issues.
+
+**wizard-config-loadable.yaml**: A loadable version of the configuration.
+
+**generated-user-config-{ARRAY_ID}.yaml**: Expanded version of the simulation config, possibly split into chunks when simulating on multiple nodes.
+</Accordion>
+
+## Common Configuration Patterns
+
+### Changing Number of Rollouts
+
+```bash
+alpasim_wizard +deploy=local \
+  wizard.log_dir=$PWD/tutorial \
+  runtime.default_scenario_parameters.n_rollouts=8
+```
+
+### Changing Inference Frequency
+
+```bash
+alpasim_wizard +deploy=local \
+  wizard.log_dir=$PWD/tutorial \
+  runtime.default_scenario_parameters.control_timestep_us=200000 \
+  runtime.default_scenario_parameters.egopose_interval_us=200000 \
+  runtime.default_scenario_parameters.time_start_offset_us=600000 \
+  runtime.default_scenario_parameters.cameras.0.frame_interval_us=200000
+```
+
+### Disabling Services
+
+```bash
+alpasim_wizard +deploy=local \
+  wizard.log_dir=$PWD/tutorial \
+  runtime.endpoints.trafficsim.skip=true
+```
+
+<Note>
+For more configuration examples, see the files in `src/wizard/configs/` including driver-specific configs, camera configs, and deployment configs.
+</Note>

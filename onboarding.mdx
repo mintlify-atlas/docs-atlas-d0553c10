@@ -1,0 +1,156 @@
+---
+title: 'Onboarding'
+description: 'Initial setup and dependencies for AlpaSim'
+---
+
+Before running AlpaSim, you need to set up your environment with the required dependencies and access credentials.
+
+## System requirements
+
+AlpaSim requires a system with:
+
+- NVIDIA GPU with CUDA 12.6 or greater
+- Docker and Docker Compose
+- Python environment (managed via `uv`)
+- Hugging Face account for data access
+
+## Dependencies
+
+<Steps>
+  <Step title="Install uv">
+    Install `uv`, a fast Python package installer and resolver:
+
+    ```bash
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    ```
+
+    For more installation options, see the [uv documentation](https://docs.astral.sh/uv/getting-started/installation/).
+  </Step>
+
+  <Step title="Install Docker">
+    Install Docker and required plugins:
+
+    <Tabs>
+      <Tab title="Ubuntu">
+        Follow the [Docker installation guide for Ubuntu](https://docs.docker.com/engine/install/ubuntu/).
+
+        Install required plugins:
+        ```bash
+        sudo apt-get install docker-ce docker-ce-cli containerd.io \
+          docker-buildx-plugin docker-compose-plugin
+        ```
+      </Tab>
+      <Tab title="Other platforms">
+        Visit the [Docker installation documentation](https://docs.docker.com/engine/install/) for your platform.
+      </Tab>
+    </Tabs>
+
+    <Warning>
+    Docker needs to run without `sudo`. If you see permission errors, add yourself to the docker group:
+    
+    ```bash
+    sudo usermod -aG docker $USER
+    ```
+    
+    Log out and log back in for the changes to take effect.
+    </Warning>
+  </Step>
+
+  <Step title="Install CUDA">
+    Install CUDA 12.6 or greater:
+
+    ```bash
+    # Visit NVIDIA CUDA downloads for your platform-specific installation
+    ```
+
+    Download from [NVIDIA CUDA Downloads](https://developer.nvidia.com/cuda-downloads) and follow the instructions for your platform.
+  </Step>
+
+  <Step title="Install NVIDIA Container Toolkit">
+    Install the NVIDIA Container Toolkit to enable GPU support in Docker containers:
+
+    ```bash
+    # Follow the installation guide for your platform
+    ```
+
+    See the [NVIDIA Container Toolkit installation guide](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) for detailed instructions.
+  </Step>
+</Steps>
+
+## Hugging Face access
+
+AlpaSim downloads simulation artifacts from Hugging Face. You need to set up access:
+
+<Steps>
+  <Step title="Create a Hugging Face account">
+    If you don't already have one, create a free account at [huggingface.co](https://huggingface.co).
+  </Step>
+
+  <Step title="Generate an access token">
+    Create an access token with read access:
+
+    1. Go to [Hugging Face settings](https://huggingface.co/settings/tokens)
+    2. Click "New token"
+    3. Select "Read" access
+    4. Generate and copy the token
+  </Step>
+
+  <Step title="Set the environment variable">
+    Export the token as an environment variable:
+
+    ```bash
+    export HF_TOKEN=<your-token-here>
+    ```
+
+    <Tip>
+    Add this to your `~/.bashrc` or `~/.zshrc` to make it permanent:
+    
+    ```bash
+    echo 'export HF_TOKEN=<your-token-here>' >> ~/.bashrc
+    source ~/.bashrc
+    ```
+    </Tip>
+  </Step>
+</Steps>
+
+## Dataset information
+
+AlpaSim uses the PhysicalAI Autonomous Vehicles NuRec dataset:
+
+- **Dataset location**: [Hugging Face dataset](https://huggingface.co/datasets/nvidia/PhysicalAI-Autonomous-Vehicles-NuRec/tree/main/sample_set/25.07_release)
+- **Format details**: See the [dataset README](https://huggingface.co/datasets/nvidia/PhysicalAI-Autonomous-Vehicles-NuRec/blob/main/README.md#dataset-format) for information on the contents of artifacts used to define scenes
+
+Scenes will be automatically downloaded to `data/nre-artifacts/all-usdzs` when you run simulations that require them.
+
+## Verify installation
+
+To verify your setup is complete:
+
+<CodeGroup>
+
+```bash Check uv
+uv --version
+```
+
+```bash Check Docker
+docker --version
+docker compose version
+```
+
+```bash Check CUDA
+nvcc --version
+```
+
+```bash Check NVIDIA Docker runtime
+docker run --rm --gpus all nvidia/cuda:12.6.0-base-ubuntu22.04 nvidia-smi
+```
+
+</CodeGroup>
+
+If all commands return version information without errors, your environment is ready.
+
+## Next steps
+
+<Card title="Quick start" icon="rocket" href="/quickstart">
+  Now that your environment is set up, run your first simulation
+</Card>

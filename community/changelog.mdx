@@ -1,0 +1,156 @@
+---
+title: Changelog
+description: AlpaSim version history and major updates
+---
+
+This document lists major updates which change UX and require adaptation. Updates are sorted by date (most recent first).
+
+## Version 2.3.26
+
+### Output Directory Structure Changes
+
+The wizard output directory structure has been reorganized for clarity:
+
+<Accordion title="Directory Changes">
+**Old Structure → New Structure**
+
+- `./asl/` → `./rollouts/` - Contains rollout logs organized by scene and session
+- `0.asl` → `rollout.asl` - Rollout ASL file
+- `0.rclog` → `rollout.rclog` - Rollout RC log file
+- `./metrics/` → `./telemetry/` - Contains Prometheus telemetry data (not evaluation metrics)
+</Accordion>
+
+<Accordion title="Video and Metrics Storage">
+- Videos are now saved next to ASL files: `rollouts/<scene_id>/<rollout_uuid>/<video>.mp4`
+- Metrics parquet files are saved next to ASL files: `rollouts/<scene_id>/<rollout_uuid>/metrics.parquet`
+- `aggregate/videos/all` now uses symlinks instead of hard copies for space efficiency
+</Accordion>
+
+#### Migration Guide
+
+<Warning>
+If you have scripts that reference the old paths, update them to use the new structure:
+</Warning>
+
+```bash
+# Old paths → New paths
+asl/                                  → rollouts/
+0.asl                                 → rollout.asl
+0.rclog                               → rollout.rclog
+metrics/                              → telemetry/
+eval/videos/ or videos/               → rollouts/<scene_id>/<rollout_uuid>/<video>.mp4
+```
+
+### Evaluation Now Runs In-Runtime by Default
+
+<Steps>
+  <Step title="In-Runtime Evaluation">
+    Evaluation metrics are now computed **during simulation (in-runtime)** by default, eliminating the need for separate eval containers.
+  </Step>
+  <Step title="Simplified Workflow">
+    This change simplifies the default workflow and reduces resource usage for most use cases.
+  </Step>
+  <Step title="Unified Video Path">
+    Videos are now saved next to ASL files in `rollouts/<scene_id>/<rollout_uuid>/` (unified path for both modes).
+  </Step>
+</Steps>
+
+<Note>
+**Restoring Previous Behavior**
+
+The previous behavior (running evaluation in separate containers after simulation) can be restored with:
+
+```bash
++eval=eval_in_separate_job
+```
+</Note>
+
+<Warning>
+**Known Limitation**
+
+Image-based metrics are not yet supported in the in-runtime workflow (e.g., `is_camera_black`).
+</Warning>
+
+## Version 1.26.26
+
+### Controller Updates
+
+Added a new controller implementation in the OSS controller which is faster than the previous one and allows the choice at runtime between the two implementations.
+
+<Accordion title="Implementation Details">
+- **Default**: New linear implementation
+- **Alternative**: Nonlinear implementation can be selected using the `defines.mpc_implementation` wizard configuration parameter
+</Accordion>
+
+## Version 1.5.25
+
+### AR1 Support
+
+AR1 support has been added to AlpaSim. Users can now run AR1 as described in the tutorial.
+
+<Card title="Learn More" icon="book" href="/quickstart/tutorial">
+  See the tutorial for AR1 usage instructions
+</Card>
+
+## Version 12.17.25
+
+### OSS Tutorial Definitions and Driver Abstraction
+
+#### Scene Storage Model Update
+
+The tutorials have been updated to reflect the changed scene storage model.
+
+<Note>
+**Important Change**
+
+Manual downloads are no longer required, although users must provide the `HF_TOKEN` environment variable to support automatic downloads.
+</Note>
+
+#### Driver Abstraction
+
+An abstraction has been made in the driver code to make it easier to add new driver types in the future.
+
+<Accordion title="Driver Code Location">
+**New Location**: `data/drivers`
+
+All driver code has been moved to this centralized location.
+</Accordion>
+
+## Version 12.12.25
+
+### Local USDZ Support Restored
+
+Local directory support was recently dropped in one of the larger refactorings. This has been restored with a slightly different interface.
+
+#### Usage
+
+For users to run AlpaSim with local USDZ files, use the `scenes.local_usdz_dir` configuration parameter:
+
+<Accordion title="Run All Scenes in Local Directory">
+```bash
+alpasim_wizard +deploy=local \
+  wizard.log_dir=<output_dir> \
+  scenes.local_usdz_dir=<abs or rel path to directory> \
+  scenes.test_suite_id=local
+```
+</Accordion>
+
+<Accordion title="Run Subset of Scenes">
+```bash
+alpasim_wizard +deploy=local \
+  wizard.log_dir=<output_dir> \
+  scenes.local_usdz_dir=<abs or rel path to directory> \
+  scenes.scene_ids=[<your scene ids>]
+```
+</Accordion>
+
+## Stay Updated
+
+<CardGroup cols={2}>
+  <Card title="Contributing" icon="code-branch" href="/community/contributing">
+    Learn how to contribute updates
+  </Card>
+  <Card title="GitHub" icon="github" href="https://github.com/NVlabs/alpasim">
+    View source code and releases
+  </Card>
+</CardGroup>

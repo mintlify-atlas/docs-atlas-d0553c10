@@ -1,0 +1,366 @@
+---
+title: SensorSim Service
+description: Camera and LiDAR rendering API for sensor simulation
+---
+
+The SensorSim Service renders synthetic camera images and LiDAR point clouds for autonomous vehicle simulation. It supports multiple camera models and realistic sensor effects.
+
+## Service Definition
+
+```protobuf
+service SensorsimService {
+    rpc render_rgb (RGBRenderRequest) returns (RGBRenderReturn);
+    rpc render_lidar (LidarRenderRequest) returns (LidarRenderReturn);
+    rpc render_aggregated (AggregatedRenderRequest) returns (AggregatedRenderReturn);
+    rpc get_version (common.Empty) returns (common.VersionId);
+    rpc get_available_scenes (common.Empty) returns (common.AvailableScenesReturn);
+    rpc get_available_cameras (AvailableCamerasRequest) returns (AvailableCamerasReturn);
+    rpc shut_down (common.Empty) returns (common.Empty);
+    rpc get_available_trajectories (AvailableTrajectoriesRequest) 
+        returns (AvailableTrajectoriesReturn);
+    rpc get_available_ego_masks (common.Empty) returns (AvailableEgoMasksReturn);
+}
+```
+
+## Camera Rendering
+
+### render_rgb
+
+Render a single RGB camera image.
+
+<ParamField body="scene_id" type="string" required>
+  Scene identifier to render
+</ParamField>
+
+<ParamField body="resolution_h" type="uint32" required>
+  Image height in pixels
+</ParamField>
+
+<ParamField body="resolution_w" type="uint32" required>
+  Image width in pixels
+</ParamField>
+
+<ParamField body="camera_intrinsics" type="CameraSpec" required>
+  Camera model and parameters (see Camera Models section)
+</ParamField>
+
+<ParamField body="frame_start_us" type="uint64" required>
+  Frame capture start time (microseconds)
+</ParamField>
+
+<ParamField body="frame_end_us" type="uint64" required>
+  Frame capture end time (for rolling shutter simulation)
+</ParamField>
+
+<ParamField body="sensor_pose" type="PosePair" required>
+  Camera pose at frame start and end
+  
+  <Expandable title="PosePair">
+    <ParamField body="start_pose" type="Pose">
+      Camera pose at frame_start_us
+    </ParamField>
+    
+    <ParamField body="end_pose" type="Pose">
+      Camera pose at frame_end_us (for rolling shutter)
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="dynamic_objects" type="DynamicObject[]">
+  Background vehicles and actors
+  
+  <Expandable title="DynamicObject">
+    <ParamField body="track_id" type="string">
+      Unique object identifier
+    </ParamField>
+    
+    <ParamField body="pose_pair" type="PosePair">
+      Object poses at frame start and end
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="image_format" type="ImageFormat" required>
+  Output image encoding:
+  - `PNG`: Lossless compression
+  - `JPEG`: Lossy compression
+  - `RGB_UINT8_PLANAR`: Raw RGB data
+</ParamField>
+
+<ParamField body="image_quality" type="float">
+  JPEG quality (0.0 to 1.0, higher = better quality)
+</ParamField>
+
+<ParamField body="insert_ego_mask" type="bool">
+  Whether to mask out ego vehicle (hood/mirrors)
+</ParamField>
+
+<ParamField body="ego_mask_id" type="EgoMaskId">
+  Ego mask identifier (required if insert_ego_mask is true)
+  
+  <Expandable title="EgoMaskId">
+    <ParamField body="camera_logical_id" type="string">
+      Camera ID (e.g., "camera_front_wide_120fov")
+    </ParamField>
+    
+    <ParamField body="rig_config_id" type="string">
+      Rig configuration (e.g., "hyperion_8.0")
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="image_bytes" type="bytes">
+  Encoded image data (format specified in request)
+</ResponseField>
+
+## LiDAR Rendering
+
+### render_lidar
+
+Render a LiDAR point cloud.
+
+<ParamField body="scene_id" type="string" required>
+  Scene identifier
+</ParamField>
+
+<ParamField body="lidar_config" type="LidarSpec" required>
+  <Expandable title="LidarSpec">
+    <ParamField body="lidar_type" type="LidarDeviceType">
+      LiDAR model:
+      - `PANDAR128`: Hesai Pandar128
+      - `AT128`: Hesai AT128
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="frame_start_us" type="uint64" required>
+  Scan start time (microseconds)
+</ParamField>
+
+<ParamField body="frame_end_us" type="uint64" required>
+  Scan end time (for rotating LiDAR)
+</ParamField>
+
+<ParamField body="sensor_pose" type="PosePair" required>
+  LiDAR pose at scan start and end
+</ParamField>
+
+<ParamField body="dynamic_objects" type="DynamicObject[]">
+  Background vehicles to include in scan
+</ParamField>
+
+<ResponseField name="point_xyzs" type="float[]">
+  Point coordinates in end-of-spin LiDAR space [x1, y1, z1, x2, y2, z2, ...]
+</ResponseField>
+
+<ResponseField name="point_intensities" type="float[]">
+  Point intensities (range 0.0 to 1.0)
+</ResponseField>
+
+<ResponseField name="num_points" type="uint32">
+  Total number of points
+</ResponseField>
+
+<ResponseField name="point_xyzs_buffer" type="bytes">
+  Binary buffer of point coordinates (alternative to point_xyzs)
+</ResponseField>
+
+<ResponseField name="point_intensities_buffer" type="bytes">
+  Binary buffer of intensities (alternative to point_intensities)
+</ResponseField>
+
+## Batch Rendering
+
+### render_aggregated
+
+Render multiple cameras and LiDARs in a single request for efficiency.
+
+<ParamField body="rgb_requests" type="RGBRenderRequest[]">
+  List of camera render requests
+</ParamField>
+
+<ParamField body="lidar_requests" type="LidarRenderRequest[]">
+  List of LiDAR render requests
+</ParamField>
+
+<ResponseField name="rgb_returns" type="RGBRenderReturn[]">
+  Rendered camera images (same order as requests)
+</ResponseField>
+
+<ResponseField name="lidar_returns" type="LidarRenderReturn[]">
+  Rendered LiDAR scans (same order as requests)
+</ResponseField>
+
+<ResponseField name="driver_data" type="bytes" optional>
+  Optional arbitrary data for advanced driver integration
+</ResponseField>
+
+## Camera Models
+
+SensorSim supports multiple camera projection models:
+
+### OpenCV Pinhole
+
+<CodeGroup>
+```protobuf Definition
+message OpenCVPinholeCameraParam {
+    double principal_point_x = 1;
+    double principal_point_y = 2;
+    double focal_length_x = 3;
+    double focal_length_y = 4;
+    repeated double radial_coeffs = 5;      // [k1, k2, k3, k4, k5, k6]
+    repeated double tangential_coeffs = 6;   // [p1, p2]
+    repeated double thin_prism_coeffs = 7;   // [s1, s2, s3, s4]
+}
+```
+
+```python Usage
+camera_spec = sensorsim_pb2.CameraSpec(
+    logical_id="camera_front_wide_120fov",
+    resolution_h=1080,
+    resolution_w=1920,
+    shutter_type=sensorsim_pb2.ROLLING_TOP_TO_BOTTOM,
+    camera_param=sensorsim_pb2.CameraSpec(
+        opencv_pinhole_param=sensorsim_pb2.OpenCVPinholeCameraParam(
+            principal_point_x=960.0,
+            principal_point_y=540.0,
+            focal_length_x=1200.0,
+            focal_length_y=1200.0,
+            radial_coeffs=[0.1, -0.2, 0.0],
+            tangential_coeffs=[0.0, 0.0]
+        )
+    )
+)
+```
+</CodeGroup>
+
+### OpenCV Fisheye
+
+For wide field-of-view cameras (>120°).
+
+```protobuf
+message OpenCVFisheyeCameraParam {
+    double principal_point_x = 1;
+    double principal_point_y = 2;
+    double focal_length_x = 3;
+    double focal_length_y = 4;
+    repeated double radial_coeffs = 5;  // [k1, k2, k3, k4]
+    double max_angle = 6;
+}
+```
+
+### F-Theta
+
+Polynomial fisheye model with forward/backward mappings.
+
+```protobuf
+message FthetaCameraParam {
+    double principal_point_x = 1;
+    double principal_point_y = 2;
+    enum PolynomialType {
+        PIXELDIST_TO_ANGLE = 1;
+        ANGLE_TO_PIXELDIST = 2;
+    }
+    PolynomialType reference_poly = 3;
+    repeated double pixeldist_to_angle_poly = 4;
+    repeated double angle_to_pixeldist_poly = 5;
+    double max_angle = 6;
+    LinearCde linear_cde = 7;
+}
+```
+
+## Query Methods
+
+### get_available_cameras
+
+Retrieve camera configurations for a scene.
+
+<ParamField body="scene_id" type="string" required>
+  Scene identifier
+</ParamField>
+
+<ResponseField name="available_cameras" type="AvailableCamera[]">
+  <Expandable title="AvailableCamera">
+    <ResponseField name="intrinsics" type="CameraSpec">
+      Camera model and parameters
+    </ResponseField>
+    
+    <ResponseField name="rig_to_camera" type="Pose">
+      Camera extrinsics (rig to camera transform)
+    </ResponseField>
+    
+    <ResponseField name="logical_id" type="string">
+      Camera identifier
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### get_available_ego_masks
+
+Retrieve available ego vehicle masks.
+
+<ResponseField name="ego_mask_metadata" type="EgoMaskMetadata[]">
+  List of ego masks with camera and rig configuration IDs
+</ResponseField>
+
+## Usage Example
+
+```python
+from alpasim_grpc.v0 import sensorsim_pb2, sensorsim_pb2_grpc
+import grpc
+
+# Connect to sensorsim
+channel = grpc.insecure_channel('localhost:50053')
+sensorsim_stub = sensorsim_pb2_grpc.SensorsimServiceStub(channel)
+
+# Get available cameras for scene
+available = sensorsim_stub.get_available_cameras(
+    sensorsim_pb2.AvailableCamerasRequest(scene_id="scene_001")
+)
+print(f"Found {len(available.available_cameras)} cameras")
+
+# Render RGB image
+request = sensorsim_pb2.RGBRenderRequest(
+    scene_id="scene_001",
+    resolution_h=720,
+    resolution_w=1280,
+    camera_intrinsics=available.available_cameras[0].intrinsics,
+    frame_start_us=1000000,
+    frame_end_us=1033000,
+    sensor_pose=sensorsim_pb2.PosePair(
+        start_pose=camera_pose,
+        end_pose=camera_pose
+    ),
+    dynamic_objects=traffic_objects,
+    image_format=sensorsim_pb2.JPEG,
+    image_quality=0.95,
+    insert_ego_mask=True,
+    ego_mask_id=sensorsim_pb2.EgoMaskId(
+        camera_logical_id="camera_front_wide_120fov",
+        rig_config_id="hyperion_8.0"
+    )
+)
+
+response = sensorsim_stub.render_rgb(request)
+
+# Save image
+with open("rendered.jpg", "wb") as f:
+    f.write(response.image_bytes)
+```
+
+## Shutter Types
+
+SensorSim supports realistic shutter simulation:
+
+- `GLOBAL`: Instantaneous capture (all pixels at once)
+- `ROLLING_TOP_TO_BOTTOM`: Row-by-row capture from top
+- `ROLLING_LEFT_TO_RIGHT`: Column-by-column from left
+- `ROLLING_BOTTOM_TO_TOP`: Row-by-row from bottom
+- `ROLLING_RIGHT_TO_LEFT`: Column-by-column from right
+
+Rolling shutter uses interpolation between `start_pose` and `end_pose`.
+
+## Related
+
+- [Driver Service](/api/grpc/driver) - Consumes rendered images
+- [Runtime Module](/api/runtime) - Orchestrates rendering

@@ -1,0 +1,164 @@
+---
+title: gRPC API Overview
+description: Overview of AlpaSim's gRPC service architecture for autonomous vehicle simulation
+---
+
+AlpaSim uses gRPC for inter-service communication, enabling distributed simulation of autonomous vehicles. The gRPC API is defined using Protocol Buffers and consists of several specialized services.
+
+## Architecture
+
+The simulation runtime coordinates multiple services via gRPC:
+
+```
+┌──────────────────┐
+│  AlpaSim Runtime │
+└────────┬─────────┘
+         │
+         ├──────► SensorSim Service (rendering)
+         ├──────► Traffic Service (background actors)
+         ├──────► Physics Service (ground interaction)
+         ├──────► Controller Service (vehicle dynamics)
+         └──────► Driver Service (ego behavior)
+```
+
+## Core Services
+
+<CardGroup cols={2}>
+  <Card title="Controller Service" icon="car" href="/api/grpc/controller">
+    Vehicle dynamics controller and propagation
+  </Card>
+  
+  <Card title="Driver Service" icon="brain" href="/api/grpc/driver">
+    Autonomous driving policy and planning
+  </Card>
+  
+  <Card title="Physics Service" icon="mountain" href="/api/grpc/physics">
+    Ground intersection and collision detection
+  </Card>
+  
+  <Card title="SensorSim Service" icon="camera" href="/api/grpc/sensorsim">
+    Camera and LiDAR rendering
+  </Card>
+  
+  <Card title="Traffic Service" icon="road" href="/api/grpc/traffic">
+    Background vehicle simulation
+  </Card>
+</CardGroup>
+
+## Common Types
+
+All services share common message types defined in `common.proto`:
+
+### Pose
+
+Represents a 3D pose with translation and rotation.
+
+<ParamField body="vec" type="Vec3">
+  Translation vector (x, y, z in meters)
+</ParamField>
+
+<ParamField body="quat" type="Quat">
+  Rotation quaternion (w, x, y, z)
+</ParamField>
+
+### Trajectory
+
+A sequence of poses over time.
+
+<ParamField body="poses" type="PoseAtTime[]">
+  Array of timestamped poses
+</ParamField>
+
+### DynamicState
+
+Velocity and acceleration information.
+
+<ParamField body="angular_velocity" type="Vec3">
+  Angular velocity (rad/s)
+</ParamField>
+
+<ParamField body="linear_velocity" type="Vec3">
+  Linear velocity (m/s)
+</ParamField>
+
+<ParamField body="linear_acceleration" type="Vec3">
+  Linear acceleration (m/s²)
+</ParamField>
+
+<ParamField body="angular_acceleration" type="Vec3">
+  Angular acceleration (rad/s²)
+</ParamField>
+
+## Coordinate Systems
+
+<Note>
+  All services follow consistent coordinate frame conventions:
+  
+  - **Local frame**: World/map coordinate system
+  - **Rig frame**: Vehicle body-fixed frame (origin at rear axle center)
+  - **AABB frame**: Bounding box center frame
+  
+  Transforms are specified as "active transforms" (e.g., `local->rig` transforms points from local to rig frame).
+  
+  See `CONTRIBUTING.md` in the source repository for detailed coordinate system documentation.
+</Note>
+
+## Session Management
+
+Most services support session-based workflows:
+
+1. **Start Session**: Initialize service with configuration
+2. **Execute Operations**: Perform rendering, simulation, etc.
+3. **Close Session**: Clean up resources
+
+```python
+# Example session workflow
+status = service.start_session(session_request)
+# ... perform operations ...
+service.close_session(close_request)
+```
+
+## Version Compatibility
+
+All services implement `get_version()` returning:
+
+<ResponseField name="version_id" type="string">
+  Semantic version (e.g., "0.3.0")
+</ResponseField>
+
+<ResponseField name="git_hash" type="string">
+  Git commit hash of the service
+</ResponseField>
+
+<ResponseField name="grpc_api_version" type="APIVersion">
+  gRPC API version (major, minor, patch)
+</ResponseField>
+
+## Protocol Buffer Files
+
+Proto definitions are located at:
+
+```
+src/grpc/alpasim_grpc/v0/
+├── common.proto       # Shared types
+├── controller.proto   # Vehicle dynamics
+├── egodriver.proto    # Autonomous driver
+├── physics.proto      # Ground physics
+├── sensorsim.proto    # Sensor rendering
+└── traffic.proto      # Traffic simulation
+```
+
+## Code Generation
+
+Generate Python stubs from proto files:
+
+```bash
+./setup_local_env.sh  # Compiles protos automatically
+```
+
+Generated code is available in the `alpasim_grpc` package:
+
+```python
+from alpasim_grpc.v0 import common_pb2
+from alpasim_grpc.v0 import controller_pb2_grpc
+```

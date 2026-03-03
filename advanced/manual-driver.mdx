@@ -1,0 +1,274 @@
+---
+title: 'Manual Driver'
+description: 'Interactive manual control of ego vehicle with keyboard input'
+---
+
+## Overview
+
+The manual driver allows **interactive control** of the ego vehicle using keyboard input. This is useful for:
+
+- Debugging and exploring simulation scenarios interactively
+- Testing specific driving behaviors manually
+- Visualizing camera feeds in real-time
+
+<Note>
+The manual driver runs as an **external service** (Python script) on your machine, not inside docker-compose.
+</Note>
+
+## Requirements
+
+- **Display server** (X11 or Wayland) - The manual driver requires a GUI for keyboard input and camera visualization
+- **pygame** - Automatically installed with driver dependencies
+
+## Controls
+
+| Key | Action |
+|-----|--------|
+| **W** / **UP** | Accelerate (increase target speed) |
+| **S** / **DOWN** | Brake/Decelerate (decrease target speed) |
+| **A** / **LEFT** | Steer left |
+| **D** / **RIGHT** | Steer right |
+| **SPACE** | Emergency stop (zero speed) |
+| **ESC** / **Q** | Quit |
+
+The driver generates **constant-curvature arc trajectories** based on the current steering angle and speed, which are then tracked by the MPC controller.
+
+## Running the Manual Driver
+
+### Step 1: Start the Manual Driver
+
+From the repository root, start the driver:
+
+<CodeGroup>
+```bash Start Manual Driver
+uv run --project src/driver python -m alpasim_driver.main \
+  --config-path=configs --config-name=manual
+```
+</CodeGroup>
+
+The driver will:
+1. Start and display a **pygame window** showing the camera feed
+2. Bind to `0.0.0.0:6789` by default (all network interfaces)
+3. Print the external IP address in logs for remote connections
+
+<Note>
+The pygame window must have **focus** to receive keyboard inputs. Click on the window before driving.
+</Note>
+
+### Step 2: Launch the Simulator
+
+Run the wizard with the `local_external_driver` deploy config:
+
+<CodeGroup>
+```bash Launch Simulator
+uv run --project src/wizard alpasim_wizard \
+  +deploy=local_external_driver \
+  wizard.log_dir=$PWD/manual_run \
+  scenes.scene_ids='["your-scene-id"]'
+```
+</CodeGroup>
+
+The runtime will connect to your driver at `localhost:6789`.
+
+<Steps>
+  <Step title="Driver starts and opens pygame window">
+    You'll see the camera feed once the simulation connects
+  </Step>
+  
+  <Step title="Simulator connects to driver">
+    The runtime detects the external driver and begins the rollout
+  </Step>
+  
+  <Step title="Drive interactively">
+    Use WASD/arrow keys to control the vehicle and watch the live camera feed
+  </Step>
+</Steps>
+
+## Remote Driver Setup
+
+If your driver runs on a **different machine** or port, override the address:
+
+<CodeGroup>
+```bash Remote Driver
+uv run --project src/wizard alpasim_wizard \
+  +deploy=local_external_driver \
+  wizard.log_dir=$PWD/manual_run \
+  scenes.scene_ids='["your-scene-id"]' \
+  wizard.external_services.driver='["192.168.1.100:6789"]'
+```
+</CodeGroup>
+
+**How to find the driver's external IP:**
+- The driver prints its external IP in the logs upon launch
+- Use the IP:port from the driver's startup message
+
+## Configuration
+
+The manual driver configuration is in `src/driver/configs/manual.yaml`.
+
+### Key Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `host` | `0.0.0.0` | Interface to bind to (all interfaces) |
+| `port` | `6789` | Port to listen on |
+| `inference.use_cameras` | `["camera_front_wide_120fov"]` | Camera to display in pygame window |
+| `log_level` | `INFO` | Logging verbosity |
+
+### Custom Configuration
+
+Override settings on the command line:
+
+<CodeGroup>
+```bash Custom Port
+uv run --project src/driver python -m alpasim_driver.main \
+  --config-path=configs --config-name=manual \
+  port=7890
+```
+
+```bash Different Camera
+uv run --project src/driver python -m alpasim_driver.main \
+  --config-path=configs --config-name=manual \
+  inference.use_cameras='["camera_front_tele_30fov"]'
+```
+
+```bash Debug Logging
+uv run --project src/driver python -m alpasim_driver.main \
+  --config-path=configs --config-name=manual \
+  log_level=DEBUG
+```
+</CodeGroup>
+
+## Simulation Settings
+
+The `local_external_driver` deploy config includes settings optimized for interactive use:
+
+<Accordion title="10 Hz Control Rate">
+**Default**: 2 Hz for batch evaluation
+
+**Manual driver**: 10 Hz for smoother response
+
+This provides more responsive steering and acceleration.
+</Accordion>
+
+<Accordion title="1920x1080 Camera Resolution">
+**Default**: Lower resolutions for batch processing
+
+**Manual driver**: Higher resolution for better visualization
+
+Provides clearer camera feed in the pygame window.
+</Accordion>
+
+<Accordion title="Localhost Networking">
+**Default**: Container-only networking
+
+**Manual driver**: `use_localhost=True` so containers can reach the external driver
+
+Allows runtime to connect to driver running outside docker.
+</Accordion>
+
+### Customizing Simulation Parameters
+
+Override `runtime.default_scenario_parameters` on the command line:
+
+<CodeGroup>
+```bash 5Hz Control with Higher Cameras
+uv run --project src/wizard alpasim_wizard \
+  +deploy=local_external_driver \
+  wizard.log_dir=$PWD/manual_run \
+  scenes.scene_ids='["your-scene-id"]' \
+  runtime.default_scenario_parameters.control_timestep_us=200000 \
+  runtime.default_scenario_parameters.cameras.0.width=2560 \
+  runtime.default_scenario_parameters.cameras.0.height=1440
+```
+</CodeGroup>
+
+<Warning>
+If you change `control_timestep_us`, also update `egopose_interval_us` and `time_start_offset_us` to maintain timing alignment. See [Performance Tuning](/advanced/operations#changing-inference-frequency).
+</Warning>
+
+## Troubleshooting
+
+<Accordion title="Pygame window not appearing">
+**Cause**: No display server or DISPLAY variable not set
+
+**Solution**:
+1. Verify you're running on a machine with a GUI (not headless server)
+2. Check `echo $DISPLAY` returns a value (e.g., `:0`)
+3. For remote X11: `export DISPLAY=:0` before running
+</Accordion>
+
+<Accordion title="Controls not responding">
+**Cause**: Pygame window doesn't have focus
+
+**Solution**:
+1. Click on the pygame window to give it focus
+2. Ensure no other application is capturing keyboard input
+3. Check driver logs for keyboard events being received
+</Accordion>
+
+<Accordion title="Simulator can't connect to driver">
+**Cause**: Network configuration or firewall blocking connection
+
+**Solution**:
+1. Verify driver started successfully and printed "Listening on 0.0.0.0:6789"
+2. Check firewall allows connections on port 6789
+3. For remote driver, use `wizard.external_services.driver` with correct IP
+4. Verify docker containers can reach host network (check `use_localhost=True`)
+</Accordion>
+
+<Accordion title="Camera feed is black or frozen">
+**Cause**: Sensorsim not rendering or network issue
+
+**Solution**:
+1. Check `txt-logs/sensorsim-0.log` for rendering errors
+2. Verify scene downloaded correctly to `data/nre-artifacts/all-usdzs/`
+3. Check GPU memory availability
+4. Look for errors in docker-compose console
+</Accordion>
+
+## Advanced Usage
+
+### Recording Manual Drives
+
+Manual drives are recorded like any other rollout:
+
+- **ASL logs**: `manual_run/rollouts/{scene_id}/{batch_uuid}/rollout.asl`
+- **Metrics**: `manual_run/rollouts/{scene_id}/{batch_uuid}/metrics.parquet`
+- **Videos**: Generated during evaluation if enabled
+
+<Note>
+You can replay manual drives using ASL logs - see [Data Pipeline](/advanced/data-pipeline#replaying-stimuli) for details.
+</Note>
+
+### Multi-Scene Manual Testing
+
+Run multiple scenes sequentially:
+
+<CodeGroup>
+```bash Multiple Scenes
+uv run --project src/wizard alpasim_wizard \
+  +deploy=local_external_driver \
+  wizard.log_dir=$PWD/manual_run \
+  scenes.scene_ids='[
+    "clipgt-026d6a39-bd8f-4175-bc61-fe50ed0403a3",
+    "clipgt-02eadd92-02f1-46d8-86fe-a9e338fed0b6",
+    "clipgt-3055a5c9-53e8-4e20-b41a-19c0f917b081"
+  ]'
+```
+</CodeGroup>
+
+The driver stays running between scenes - just keep controlling the vehicle as each new scene loads.
+
+### Custom Trajectory Generation
+
+The manual driver generates trajectories based on:
+- **Current speed**: Set by W/S keys
+- **Steering angle**: Set by A/D keys  
+- **Arc trajectory**: Constant-curvature path followed by MPC controller
+
+To customize trajectory generation, edit:
+- `src/driver/src/alpasim_driver/manual_control.py` - Keyboard handling
+- `src/driver/src/alpasim_driver/trajectory_planner.py` - Trajectory math
+
+Changes are automatically mounted - just restart the driver to test.

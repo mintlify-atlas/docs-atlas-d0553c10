@@ -1,0 +1,304 @@
+---
+title: 'Debugging Techniques'
+description: 'Advanced debugging with breakpoints, log analysis, and ASL replay'
+---
+
+## Overview
+
+Level 3 debugging in AlpaSim enables breakpoint debugging of individual components while running a full simulation. This allows you to debug complex interactions between microservices with your favorite debugger attached.
+
+<Note>
+This section covers debugging **simulation components** (controller, runtime, driver), not vehicle behavior within simulation. For basic configuration debugging, see the [Quickstart Guide](/quickstart).
+</Note>
+
+## Breakpoint Debugging Workflow
+
+The basic approach to enable breakpoint debugging:
+
+<Steps>
+  <Step title="Generate config files without running">
+    Use the wizard to create configuration files but skip execution:
+    ```bash
+    alpasim_wizard +deploy=local \
+      wizard.log_dir=$PWD/tutorial_dbg \
+      wizard.run_method=NONE \
+      wizard.debug_flags.use_localhost=True
+    ```
+  </Step>
+  
+  <Step title="Start the component manually">
+    Launch the component you want to debug from your IDE or terminal with breakpoints set
+  </Step>
+  
+  <Step title="Run the rest of the simulation">
+    Start remaining services via docker-compose, excluding the manually-started component
+  </Step>
+</Steps>
+
+## Debugging the Controller
+
+The controller manages ego vehicle trajectory tracking and pose estimation.
+
+### Terminal-Based Debugging
+
+<Steps>
+  <Step title="Generate configs">
+    ```bash
+    alpasim_wizard +deploy=local \
+      wizard.log_dir=$PWD/tutorial_dbg \
+      wizard.run_method=NONE \
+      wizard.debug_flags.use_localhost=True
+    ```
+  </Step>
+  
+  <Step title="Note the allocated port">
+    Check `tutorial_dbg/docker-compose.yaml` for the controller port. Look for components in the `sim` profile: `controller-0`, `driver-0`, `physics-0`, `runtime-0`, `sensorsim-0`.
+    
+    Example: `controller-0` might be allocated port **6003**.
+  </Step>
+  
+  <Step title="Start controller with debugger">
+    From `src/controller/`, start the controller manually:
+    ```bash
+    cd src/controller/
+    mkdir my_controller_log_dir
+    # Port must match docker-compose.yaml
+    uv run python -m alpasim_controller.server \
+      --port=6003 \
+      --log_dir=my_controller_log_dir \
+      --log-level=INFO
+    ```
+  </Step>
+  
+  <Step title="Launch remaining services">
+    From the generated directory:
+    ```bash
+    cd tutorial_dbg
+    docker compose -f docker-compose.yaml --profile sim up \
+      runtime-0 driver-0 physics-0 sensorsim-0
+    ```
+  </Step>
+</Steps>
+
+### VSCode Debugger Configuration
+
+For a better debugging experience, use VSCode's built-in debugger:
+
+<CodeGroup>
+```json .vscode/launch.json
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug Controller (Level 3 Tutorial)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "alpasim_controller.server",
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}/src/controller",
+      "args": [
+        "--port=6003",
+        "--log_dir=my_controller_logdir",
+        "--log-level=INFO"
+      ],
+      "console": "integratedTerminal"
+    }
+  ]
+}
+```
+</CodeGroup>
+
+<Steps>
+  <Step title="Set breakpoints">
+    Open controller source files and click in the gutter to set breakpoints
+  </Step>
+  
+  <Step title="Launch debugger">
+    Press **F5** or go to **Run and Debug** → "Debug Controller"
+  </Step>
+  
+  <Step title="Start simulation">
+    Breakpoints will hit as the simulation runs!
+  </Step>
+</Steps>
+
+<Warning>
+Make sure the `--port` argument matches the port allocated in `docker-compose.yaml`.
+</Warning>
+
+## Debugging the Runtime
+
+Debugging the runtime requires a different approach since other services must be running before the runtime starts.
+
+### Key Differences
+
+- **Start order**: Other services must be up before launching the runtime
+- **Speed iteration**: Set `runtime.endpoints.do_shutdown=False` to keep containers running between runs
+
+### Terminal-Based Debugging
+
+<Steps>
+  <Step title="Generate configs with no shutdown">
+    ```bash
+    alpasim_wizard +deploy=local \
+      wizard.log_dir=$PWD/tutorial_dbg_runtime \
+      wizard.run_method=NONE \
+      wizard.debug_flags.use_localhost=True \
+      runtime.endpoints.do_shutdown=False
+    ```
+  </Step>
+  
+  <Step title="Start non-runtime services">
+    ```bash
+    cd tutorial_dbg_runtime
+    docker compose -f docker-compose.yaml --profile sim up \
+      driver-0 controller-0 physics-0 sensorsim-0
+    ```
+  </Step>
+  
+  <Step title="Start runtime manually">
+    From `src/runtime/`:
+    ```bash
+    cd src/runtime/
+    uv run python -m alpasim_runtime.simulate \
+      --usdz-glob=../../data/nre-artifacts/all-usdzs/**/*.usdz \
+      --user-config=../../tutorial_dbg_runtime/generated-user-config-0.yaml \
+      --network-config=../../tutorial_dbg_runtime/generated-network-config.yaml \
+      --log-dir=../../tutorial_dbg_runtime \
+      --log-level=INFO
+    ```
+  </Step>
+</Steps>
+
+### VSCode Debugger Configuration
+
+<CodeGroup>
+```json .vscode/launch.json
+{
+  "name": "Debug Runtime (Level 3 Tutorial)",
+  "type": "debugpy",
+  "request": "launch",
+  "module": "alpasim_runtime.simulate",
+  "justMyCode": false,
+  "cwd": "${workspaceFolder}/src/runtime",
+  "args": [
+    "--usdz-glob=../../data/nre-artifacts/all-usdzs/**/*.usdz",
+    "--user-config=../../tutorial_dbg_runtime/generated-user-config-0.yaml",
+    "--network-config=../../tutorial_dbg_runtime/generated-network-config.yaml",
+    "--log-dir=../../tutorial_dbg_runtime",
+    "--log-level=INFO"
+  ],
+  "console": "integratedTerminal"
+}
+```
+</CodeGroup>
+
+## ASL Log Analysis
+
+### What are ASL Logs?
+
+ASL (AlpaSim Log) files contain most messages exchanged during simulation as size-delimited protobuf messages. They're stored in `rollouts/{scene_id}/{batch_uuid}/rollout.asl`.
+
+**Use cases:**
+- Debugging model behavior
+- Replaying stimuli on a driver instance
+- Reproducing bugs with a debugger attached
+- Creating evaluation videos
+
+### Reading ASL Logs
+
+Use the `async_read_pb_log` utility to stream messages:
+
+<CodeGroup>
+```python Read First 20 Messages
+from alpasim_grpc.utils.logs import async_read_pb_log
+
+i = 0
+async for log_entry in async_read_pb_log("path/to/rollout.asl"):
+    print(log_entry)
+    i += 1
+    if i == 20:
+        break
+```
+
+```python Jupyter Notebook
+# In a Jupyter notebook with async support
+from alpasim_grpc.utils.logs import async_read_pb_log
+
+path = "tutorial/rollouts/clipgt-026d.../rollout.asl"
+
+async for entry in async_read_pb_log(path):
+    # Process each message
+    if hasattr(entry, 'rollout_metadata'):
+        print(f"Scene: {entry.rollout_metadata.session_metadata.scene_id}")
+        print(f"Steps: {entry.rollout_metadata.session_metadata.n_sim_steps}")
+```
+</CodeGroup>
+
+### Message Types
+
+ASL files contain three types of messages:
+
+<Accordion title="RolloutMetadata">
+Metadata header for reproducibility and bookkeeping:
+- Session UUID and scene ID
+- Batch size and simulation steps
+- Timestamp and control frequency
+- Version information (runtime, driver, API)
+- Actor definitions
+</Accordion>
+
+<Accordion title="ActorPoses">
+Location of all actors (including `'EGO'`) in global coordinate space:
+- Position (x, y, z)
+- Orientation (quaternion)
+- Velocity
+- Timestamp
+</Accordion>
+
+<Accordion title="Service Requests/Responses">
+Microservice RPC calls enable replay mode:
+- `RolloutCameraImage` - Camera frame requests (used to create MP4 videos)
+- Driver planning requests/responses
+- Physics update calls
+- Sensor simulation requests
+</Accordion>
+
+### Replaying Stimuli
+
+The [replay_logs_alpamodel.ipynb](https://github.com/NVlabs/alpasim/blob/main/src/runtime/notebooks/replay_logs_alpamodel.ipynb) notebook shows how to:
+1. Read an ASL log
+2. Extract driver stimuli (camera frames, ego poses)
+3. Replay them on a driver instance
+4. Reproduce behavior with a debugger attached
+
+<Note>
+ASL logs don't specify the USDZ file UUID - you'll need to match by scene_id from metadata.
+</Note>
+
+## Console Log Analysis
+
+The docker-compose console contains logs from all microservices and is the **first place to look** when something goes wrong.
+
+### Basic Troubleshooting
+
+<Steps>
+  <Step title="Check for missing output">
+    If the `rollouts` directory doesn't appear, check console logs for errors
+  </Step>
+  
+  <Step title="Find first error">
+    Scroll to find where the first errors occurred - subsequent errors are often cascading failures
+  </Step>
+  
+  <Step title="Service-specific logs">
+    Additional logs may be in:
+    - `txt-logs/` - Per-service text logs
+    - `driver/` - Driver service logs
+    - `telemetry/` - Performance metrics
+  </Step>
+</Steps>
+
+<Warning>
+Microservices may produce additional debug logs not shown in the console. Check `txt-logs/` for detailed service output.
+</Warning>

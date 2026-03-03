@@ -1,80 +1,160 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: 'Quick start'
+description: 'Run your first AlpaSim simulation in minutes'
 ---
 
-## Get started in three steps
+This guide will walk you through running your first simulation with the VaVAM driver policy, interpreting the results, and understanding the output structure.
 
-Get your documentation site running locally and make your first customization.
+## Prerequisites
 
-### Step 1: Set up your local environment
+Before starting, ensure you have completed the [onboarding setup](/onboarding) with all dependencies installed.
+
+## Run your first simulation
+
+<Steps>
+  <Step title="Set up your environment">
+    Run the setup script to compile protos, download an example driver model, and install the `alpasim_wizard` command line tool:
+
+    ```bash
+    source setup_local_env.sh
+    ```
+
+    This will ensure you have a valid Hugging Face token and prepare your environment.
+  </Step>
+
+  <Step title="Run the wizard">
+    Execute the wizard to create necessary config files, download the scene (if necessary), and run a simulation:
+
+    ```bash
+    alpasim_wizard +deploy=local wizard.log_dir=$PWD/tutorial
+    ```
+
+    This creates a `tutorial/` directory with all necessary config files and runs the simulation.
+
+    <Note>
+    The wizard uses VaVAM as the default driver policy. The first run will download the required scene from Hugging Face.
+    </Note>
+  </Step>
+
+  <Step title="View the results">
+    Once the simulation completes, find the visualization video in the created `tutorial` directory:
+
+    ```bash
+    tutorial/aggregate/videos/all/clipgt-026d..._0.mp4
+    ```
+
+    Open this MP4 file to see a visualization of your simulation results.
+  </Step>
+</Steps>
+
+## Understanding the results
+
+The simulation creates a comprehensive output structure in the `tutorial/` directory:
+
+### Key directories
 
 <AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
+  <Accordion title="rollouts/">
+    Contains logs of simulation behavior for each rollout, used to analyze AV behavior and calculate metrics. Organized as `rollouts/{scene_id}/{batch_uuid}/`.
+
+    Key files:
+    - `rollout.asl`: Messages exchanged within the simulation (useful for debugging)
+    - `metrics.parquet`: Per-rollout evaluation metrics
+    - `{clipgt_id}_{batch_id}_{rollout_id}.mp4`: Evaluation videos
+    - `_complete`: Marker file indicating successful rollout completion
   </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
+
+  <Accordion title="aggregate/">
+    Contains aggregated results across all rollouts:
+
+    - `metrics_results.txt`: Formatted table of driving scores (mean, std, quantiles)
+    - `metrics_results.png`: Visual summary of driving quality metrics
+    - `metrics_unprocessed.parquet`: Combined metrics from all rollouts
+    - `videos/`: Videos organized by violation type (collision, offroad, etc.)
+  </Accordion>
+
+  <Accordion title="Configuration files">
+    Various YAML files provide insight into the simulation configuration:
+
+    - `wizard-config.yaml`: Config used by the wizard after applying Hydra inheritance
+    - `generated-user-config-{ARRAY_ID}.yaml`: Expanded simulation config
+    - `trafficsim-config.yaml`: Traffic simulation configuration
+    - `generated-network-config.yaml`: Service port mappings
   </Accordion>
 </AccordionGroup>
 
-### Step 2: Deploy your changes
+### Example directory structure
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+```
+tutorial/
+├── aggregate/
+│   ├── metrics_results.png
+│   ├── metrics_results.txt
+│   ├── metrics_unprocessed.parquet
+│   └── videos/
+│       ├── all/
+│       │   └── clipgt-026d..._0.mp4
+│       └── violations/
+│           ├── collision_at_fault/
+│           ├── collision_rear/
+│           ├── dist_to_gt_trajectory/
+│           └── offroad/
+├── rollouts/
+│   └── clipgt-f7020b3e.../
+│       └── 86513b18-96c5.../
+│           ├── rollout.asl
+│           ├── rollout.rclog
+│           ├── metrics.parquet
+│           └── _complete
+├── driver-config.yaml
+├── eval-config.yaml
+├── wizard-config.yaml
+└── run.sh
+```
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+## Basic debugging
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+<Warning>
+This section covers debugging the simulator configuration itself, not vehicle behavior within the simulation.
+</Warning>
 
-### Step 3: Go live
+The console contains logs from all microservices and is the first place to look when something goes wrong.
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+If the `rollouts` directory does not appear or other errors occur:
+
+1. Check the console logs to identify where the first errors occurred
+2. Review the `wizard-config.yaml` for configuration issues
+3. Ensure all services started successfully
+
+## Try a different driver policy
+
+Once you've successfully run your first simulation, try running with the Alpamayo-R1 model:
+
+<CodeGroup>
+
+```bash Download model weights
+huggingface-cli download nvidia/Alpamayo-R1-10B
+```
+
+```bash Run with Alpamayo-R1
+alpasim_wizard +deploy=local \
+  wizard.log_dir=$PWD/tutorial_alpamayo \
+  driver=[ar1,ar1_runtime_configs]
+```
+
+</CodeGroup>
+
+<Note>
+The Alpamayo-R1 model is large (10B parameters). Ensure your GPU has sufficient capacity to run it.
+</Note>
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
-
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Customize simulations" icon="sliders" href="/configuration">
+    Learn how to configure scenes, driver policies, and runtime parameters
+  </Card>
+  <Card title="Operations guide" icon="gauge" href="/operations">
+    Performance tuning, troubleshooting, and advanced usage
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

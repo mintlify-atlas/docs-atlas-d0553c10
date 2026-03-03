@@ -1,0 +1,314 @@
+---
+title: 'Custom Components'
+description: 'Build custom drivers and services with container images and code changes'
+---
+
+## Overview
+
+AlpaSim's microservice architecture allows you to customize or replace any component. This guide covers:
+- Making code changes during development
+- Building custom container images
+- Understanding service interfaces via protocol buffers
+
+## Code Changes
+
+During development, code changes in the repository are **automatically mounted** into docker containers at runtime.
+
+### Quick Iteration Workflow
+
+<Steps>
+  <Step title="Edit source code">
+    Make changes to any file in `src/`:
+    ```bash
+    # Example: add logging to driver
+    vim src/driver/src/alpasim_driver/inference.py
+    ```
+  </Step>
+  
+  <Step title="Rerun the wizard">
+    No rebuild needed - changes are live:
+    ```bash
+    alpasim_wizard +deploy=local wizard.log_dir=$PWD/test_run
+    ```
+  </Step>
+  
+  <Step title="Check output">
+    Your changes will be reflected immediately in the next run
+  </Step>
+</Steps>
+
+<Warning>
+**Dependency Changes Require Rebuild**
+
+Code changes that rely on **new dependencies** will require rebuilding the container image, as the virtual environment is not synced at runtime.
+</Warning>
+
+### Example: Adding Debug Logging
+
+Try adding logging statements to the driver:
+
+<CodeGroup>
+```python src/driver/src/alpasim_driver/inference.py
+import logging
+
+logger = logging.getLogger(__name__)
+
+def run_inference(frames, metadata):
+    logger.info(f"Running inference on {len(frames)} frames")
+    logger.debug(f"Metadata: {metadata}")
+    # ... existing code ...
+```
+</CodeGroup>
+
+Rerun the wizard and check `driver/` logs to see your output.
+
+## Custom Container Images
+
+The simulation is split into multiple microservices, each running in its own docker container:
+
+- **sensorsim** - Neural rendering engine for camera images
+- **driver** - Driving policy (VaVAM, Alpamayo-R1, etc.)
+- **controller** - Trajectory tracking and pose estimation  
+- **physics** - Physics simulation and collision detection
+- **runtime** - Orchestration and scenario execution
+- **trafficsim** - Background traffic simulation
+
+### Service Interface Requirements
+
+The **primary requirement** for a custom container image is that it exposes a **gRPC endpoint** compatible with the expected service interface.
+
+### Overriding Default Images
+
+Default images are specified in [`stable_manifest/oss.yaml`](https://github.com/NVlabs/alpasim/blob/main/src/wizard/configs/stable_manifest/oss.yaml). Override them using:
+
+```bash
+alpasim_wizard +deploy=local \
+  wizard.log_dir=$PWD/custom_run \
+  services.<service>.image=<your-registry>/<your-image>:<tag> \
+  services.<service>.command="your-custom-command"
+```
+
+### Example: Custom Driver Image
+
+Replace the default driver with a custom image:
+
+<CodeGroup>
+```bash Command Line Override
+alpasim_wizard +deploy=local \
+  wizard.log_dir=$PWD/custom_driver_run \
+  services.driver.image=myregistry/custom-driver:v1.0 \
+  services.driver.command="python -m my_driver.server --port=6789"
+```
+
+```yaml Config File Override
+# In custom_deploy.yaml
+services:
+  driver:
+    image: myregistry/custom-driver:v1.0
+    command: python -m my_driver.server --port=6789
+```
+</CodeGroup>
+
+<Note>
+Your custom driver must implement the gRPC interface defined in `src/grpc/alpasim_grpc/v0/egodriver.proto`.
+</Note>
+
+### Example: Custom Model Weights
+
+Mount a custom model directory for the VaVAM driver:
+
+```bash
+alpasim_wizard +deploy=local \
+  wizard.log_dir=$PWD/custom_model_run \
+  defines.vavam_driver=/path/to/custom/vavam-driver
+```
+
+**Default location**: `data/vavam-driver/` (in repository root)
+
+The wizard mounts `defines.vavam_driver` as `/mnt/vavam_driver` in the container.
+
+## Protocol Buffer Definitions
+
+All microservice APIs are defined using Protocol Buffers in `src/grpc/alpasim_grpc/v0/`.
+
+### Available Service Interfaces
+
+| Service | Proto File | Description |
+|---------|-----------|-------------|
+| **Sensorsim** | `sensorsim.proto` | Neural rendering for camera images |
+| **Driver** | `egodriver.proto` | Driving policy interface |
+| **Controller** | `controller.proto` | Trajectory tracking and pose |
+| **Physics** | `physics.proto` | Physics simulation |
+| **Runtime** | `runtime.proto` | Orchestration (internal) |
+| **Traffic** | `traffic.proto` | Background traffic |
+| **Common** | `common.proto` | Shared types (poses, trajectories) |
+| **Logging** | `logging.proto` | ASL log format |
+
+### Using gRPC APIs
+
+After compiling protos with `uv run compile-protos` from `src/grpc/`:
+
+<CodeGroup>
+```python Example: Sensorsim Client
+import grpc
+from alpasim_grpc.v0.sensorsim_pb2 import RenderRequest, RenderReturn
+from alpasim_grpc.v0.sensorsim_pb2_grpc import SensorsimServiceStub
+
+with grpc.insecure_channel('host:port') as channel:
+    service = SensorsimServiceStub(channel)
+    render_request = RenderRequest(
+        scene_id="clipgt-026d6a39-bd8f...",
+        camera_config=camera_config,
+        timestamp_us=1234567890,
+    )
+    response: RenderReturn = service.render(render_request)
+    print(f"Rendered {len(response.images)} images")
+```
+
+```python Example: Driver Server
+from concurrent import futures
+import grpc
+from alpasim_grpc.v0.egodriver_pb2 import PlanRequest, PlanReturn
+from alpasim_grpc.v0.egodriver_pb2_grpc import (
+    EgodriverServiceServicer,
+    add_EgodriverServiceServicer_to_server
+)
+
+class MyDriver(EgodriverServiceServicer):
+    def plan(self, request: PlanRequest, context) -> PlanReturn:
+        # Your driving policy logic
+        trajectory = self.compute_trajectory(request.images, request.pose)
+        return PlanReturn(trajectory=trajectory)
+
+server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+add_EgodriverServiceServicer_to_server(MyDriver(), server)
+server.add_insecure_port('[::]:6789')
+server.start()
+server.wait_for_termination()
+```
+</CodeGroup>
+
+### Compiling Protocol Buffers
+
+<Steps>
+  <Step title="Navigate to grpc directory">
+    ```bash
+    cd src/grpc
+    ```
+  </Step>
+  
+  <Step title="Compile protos">
+    ```bash
+    uv run compile-protos
+    ```
+    This generates `*_pb2.py` and `*_pb2_grpc.py` files.
+  </Step>
+  
+  <Step title="Clean generated files (optional)">
+    ```bash
+    uv run clean-protos
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+Protobuf definitions are **not automatically compiled** when installing the gRPC package. You must run `uv run compile-protos` manually after changes.
+</Warning>
+
+## Coordinate Frame Conventions
+
+When implementing custom services, follow AlpaSim's coordinate frame conventions:
+
+<Accordion title="Frame Naming Convention">
+**Format**: `{quantity}_{source_frame}_to_{target_frame}`
+
+Examples:
+- `pose_local_to_rig` - Pose from local to rig frame
+- `velocity_vehicle_in_local` - Velocity in local frame
+- `transform_camera_to_vehicle` - Transform from camera to vehicle
+</Accordion>
+
+<Accordion title="Standard Frames">
+- **global** - World coordinate system
+- **local** - Scene-local coordinates
+- **vehicle** - Ego vehicle body frame
+- **camera** - Camera sensor frame
+- **rig** - Sensor rig mounting frame
+</Accordion>
+
+Refer to [CONTRIBUTING.md](https://github.com/nvidia/alpasim/blob/main/CONTRIBUTING.md#coordinate-systems) for detailed conventions shared across the runtime and gRPC APIs.
+
+## Building Custom Images
+
+### Example Dockerfile
+
+<CodeGroup>
+```dockerfile Dockerfile
+FROM python:3.12-slim
+
+# Install dependencies
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+# Copy service code
+COPY my_service/ ./my_service/
+
+# Expose gRPC port
+EXPOSE 6789
+
+# Start service
+CMD ["python", "-m", "my_service.server", "--port=6789"]
+```
+
+```bash Build & Push
+# Build image
+docker build -t myregistry/my-service:v1.0 .
+
+# Push to registry
+docker push myregistry/my-service:v1.0
+
+# Use in wizard
+alpasim_wizard +deploy=local \
+  services.driver.image=myregistry/my-service:v1.0
+```
+</CodeGroup>
+
+### Multi-Replica Services
+
+If your service will run with multiple replicas (for scaling), ensure:
+
+1. **Thread-safe state management** - Each replica handles concurrent requests
+2. **GPU assignment** - Configure `services.<service>.gpus` if using GPUs
+3. **Port allocation** - Docker compose auto-assigns ports per replica
+
+See [Performance Tuning](/advanced/operations#performance-tuning) for replica configuration.
+
+## Testing Custom Components
+
+<Steps>
+  <Step title="Unit test your service">
+    Test gRPC interface implementation:
+    ```bash
+    pytest tests/test_my_service.py
+    ```
+  </Step>
+  
+  <Step title="Integration test with wizard">
+    Run a minimal simulation:
+    ```bash
+    alpasim_wizard +deploy=local \
+      wizard.log_dir=$PWD/test \
+      scenes.scene_ids='["clipgt-026d6a39..."]' \
+      services.driver.image=myregistry/my-service:dev
+    ```
+  </Step>
+  
+  <Step title="Check outputs">
+    Verify simulation completes and check results:
+    ```bash
+    ls test/rollouts/  # Should contain rollout data
+    cat test/txt-logs/driver-0.log  # Check service logs
+    ```
+  </Step>
+</Steps>

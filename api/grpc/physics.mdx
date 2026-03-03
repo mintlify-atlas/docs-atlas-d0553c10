@@ -1,0 +1,214 @@
+---
+title: Physics Service
+description: Ground intersection and collision detection API
+---
+
+The Physics Service provides ground plane intersection calculations to prevent vehicles from clipping through terrain. It adjusts vehicle poses to maintain contact with the ground mesh.
+
+## Service Definition
+
+```protobuf
+service PhysicsService {
+    rpc ground_intersection (PhysicsGroundIntersectionRequest) 
+        returns (PhysicsGroundIntersectionReturn);
+    rpc get_version (common.Empty) returns (common.VersionId);
+    rpc get_available_scenes (common.Empty) returns (common.AvailableScenesReturn);
+    rpc shut_down (common.Empty) returns (common.Empty);
+}
+```
+
+## Methods
+
+### ground_intersection
+
+Compute ground-adjusted poses for ego vehicle and background actors.
+
+<ParamField body="scene_id" type="string" required>
+  Scene identifier to load the correct ground mesh
+</ParamField>
+
+<ParamField body="now_us" type="uint64" required>
+  Start timestamp for all pose pairs (microseconds)
+</ParamField>
+
+<ParamField body="future_us" type="uint64" required>
+  End timestamp for all pose pairs (microseconds)
+</ParamField>
+
+<ParamField body="ego_data" type="EgoData" optional>
+  Ego vehicle bounding box and poses
+  
+  <Expandable title="EgoData">
+    <ParamField body="aabb" type="AABB" required>
+      Axis-aligned bounding box dimensions (size_x, size_y, size_z in meters)
+    </ParamField>
+    
+    <ParamField body="pose_pair" type="PosePair" required>
+      <Expandable title="PosePair">
+        <ParamField body="now_pose" type="Pose">
+          Active transform local→aabb at `now_us`. 
+          Assumed to be already valid (copied from previous call).
+        </ParamField>
+        
+        <ParamField body="future_pose" type="Pose">
+          Active transform local→aabb at `future_us`.
+          Physics system will adjust this pose.
+        </ParamField>
+      </Expandable>
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="other_objects" type="OtherObject[]">
+  Background vehicles and actors
+  
+  <Expandable title="OtherObject">
+    <ParamField body="aabb" type="AABB">
+      Object bounding box dimensions
+    </ParamField>
+    
+    <ParamField body="pose_pair" type="PosePair">
+      Object poses at now and future times (same structure as ego)
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="ego_pose" type="ReturnPose" optional>
+  Adjusted ego vehicle pose
+  
+  <Expandable title="ReturnPose">
+    <ResponseField name="pose" type="Pose">
+      Adjusted active transform local→aabb for bounding box center
+    </ResponseField>
+    
+    <ResponseField name="status" type="Status">
+      Update status code:
+      - `SUCCESSFUL_UPDATE`: Pose adjusted successfully
+      - `UNKNOWN`: Unknown error
+      - `INSUFFICIENT_POINTS_FITPLANE`: Not enough ground points for fit
+      - `HIGH_TRANSLATION`: Adjustment too large (translation)
+      - `HIGH_ROTATION`: Adjustment too large (rotation)
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="other_poses" type="ReturnPose[]">
+  Adjusted poses for background objects (same order as request)
+</ResponseField>
+
+### get_available_scenes
+
+Query which scenes are available in the physics service.
+
+<ResponseField name="scene_ids" type="string[]">
+  List of scene identifiers with ground meshes
+</ResponseField>
+
+## Usage Example
+
+From `alpasim_runtime/services/physics_service.py`:
+
+```python
+from alpasim_grpc.v0 import physics_pb2, physics_pb2_grpc
+from alpasim_grpc.v0.common_pb2 import AABB, Pose, Vec3, Quat
+
+# Connect to physics service
+channel = grpc.insecure_channel('localhost:50052')
+physics_stub = physics_pb2_grpc.PhysicsServiceStub(channel)
+
+# Check available scenes
+available = physics_stub.get_available_scenes(Empty())
+print(f"Available scenes: {available.scene_ids}")
+
+# Prepare ego vehicle data
+ego_aabb = AABB(size_x=4.5, size_y=2.0, size_z=1.5)
+previous_pose = Pose(
+    vec=Vec3(x=10.0, y=5.0, z=0.0),
+    quat=Quat(w=1.0, x=0.0, y=0.0, z=0.0)
+)
+future_pose = Pose(
+    vec=Vec3(x=10.5, y=5.1, z=0.0),
+    quat=Quat(w=0.999, x=0.0, y=0.0, z=0.044)
+)
+
+# Request ground intersection
+request = physics_pb2.PhysicsGroundIntersectionRequest(
+    scene_id="scene_001",
+    now_us=1000000,
+    future_us=1100000,
+    ego_data=physics_pb2.PhysicsGroundIntersectionRequest.EgoData(
+        aabb=ego_aabb,
+        pose_pair=physics_pb2.PhysicsGroundIntersectionRequest.PosePair(
+            now_pose=previous_pose,
+            future_pose=future_pose
+        )
+    )
+)
+
+response = physics_stub.ground_intersection(request)
+
+if response.ego_pose.status == physics_pb2.PhysicsGroundIntersectionReturn.SUCCESSFUL_UPDATE:
+    adjusted_pose = response.ego_pose.pose
+    print(f"Adjusted position: {adjusted_pose.vec}")
+    print(f"Adjusted rotation: {adjusted_pose.quat}")
+else:
+    print(f"Physics update failed: {response.ego_pose.status}")
+```
+
+## Status Codes
+
+The physics service returns status codes indicating the quality of the ground fit:
+
+<CodeGroup>
+```python SUCCESSFUL_UPDATE
+# Pose was successfully adjusted to match ground
+status == PhysicsGroundIntersectionReturn.SUCCESSFUL_UPDATE
+```
+
+```python INSUFFICIENT_POINTS_FITPLANE
+# Not enough ground points under the vehicle
+# May occur on bridge edges or sparse terrain
+status == PhysicsGroundIntersectionReturn.INSUFFICIENT_POINTS_FITPLANE
+```
+
+```python HIGH_TRANSLATION / HIGH_ROTATION
+# Adjustment exceeded thresholds
+# Indicates potential simulation instability
+status == PhysicsGroundIntersectionReturn.HIGH_TRANSLATION
+status == PhysicsGroundIntersectionReturn.HIGH_ROTATION
+```
+</CodeGroup>
+
+## Configuration
+
+<Note>
+  Physics service parameters can be configured in the runtime config:
+  
+  - **Update mode**: `ONCE_PER_STEP` or `TWICE_PER_STEP`
+  - **Threshold settings**: Maximum allowed translation/rotation adjustments
+  
+  See `PhysicsUpdateMode` in the runtime configuration schema.
+</Note>
+
+## Ground Mesh Format
+
+The physics service loads ground meshes from scene USDZ files. Ground geometry should:
+
+- Use consistent units (meters)
+- Provide adequate density for vehicle wheel base
+- Cover the full extent of drivable area
+
+## Coordinate Frames
+
+<Note>
+  **AABB frame**: Center of the axis-aligned bounding box
+  
+  The physics service operates on bounding box center poses, not rig poses. The runtime handles frame conversions between rig and AABB frames.
+  
+  Pose adjustments preserve X-Y translation while adjusting Z (height) and pitch/roll to match terrain.
+</Note>
+
+## Related
+
+- [Runtime Module](/api/runtime) - Integrates physics service
+- [Controller Service](/api/grpc/controller) - Uses physics-adjusted poses

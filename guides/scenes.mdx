@@ -1,0 +1,202 @@
+---
+title: Scene Management
+description: Managing and selecting scenes for AlpaSim simulations
+---
+
+The scene in AlpaSim is a NuRec reconstruction of a real-world driving log. Publicly available NuRec scenes are stored on [Hugging Face](https://huggingface.co/datasets/nvidia/PhysicalAI-Autonomous-Vehicles-NuRec/tree/main/sample_set/25.07_release) and are used to create realistic driving scenarios for testing autonomous driving policies.
+
+## NuRec Scenes Overview
+
+NuRec (Neural Reconstruction) scenes are high-fidelity reconstructions of real-world driving scenarios that include:
+
+- **3D environment geometry** from sensor data
+- **Vehicle trajectories** of the ego vehicle and traffic
+- **Camera recordings** from multiple viewpoints
+- **Map information** including lanes, road edges, and traffic signs
+
+Once downloaded, scenes are placed under `data/nre-artifacts/all-usdzs`. The scenes are identified by their UUID, rather than their filenames, to prevent versioning issues.
+
+<Note>
+Scene IDs are defined in `data/scenes/sim_scenes.csv`. A scene ID does not uniquely identify the `.usdz` file, as the scene ID comes from the `metadata.yaml` file inside the `.usdz` zip file. The proper artifact file will be chosen to satisfy the NRE version requirements.
+</Note>
+
+## Scene Selection Methods
+
+AlpaSim provides two primary methods for selecting scenes:
+
+<Tabs>
+  <Tab title="Individual Scenes">
+    ### Selecting Individual Scenes
+    
+    For custom scene selection, you can specify scenes manually using `scenes.scene_ids`:
+    
+    ```bash
+    alpasim_wizard +deploy=local \
+      wizard.log_dir=$PWD/tutorial_custom_scene \
+      scenes.scene_ids=['clipgt-02eadd92-02f1-46d8-86fe-a9e338fed0b6']
+    ```
+    
+    #### Multiple Scenes
+    
+    You can specify multiple scenes as a comma-separated list:
+    
+    ```bash
+    alpasim_wizard +deploy=local \
+      wizard.log_dir=$PWD/tutorial_multi_scene \
+      scenes.scene_ids=[
+        'clipgt-02eadd92-02f1-46d8-86fe-a9e338fed0b6',
+        'clipgt-a309e228-26e1-423e-a44c-cb00aa7378cb'
+      ]
+    ```
+    
+    <Note>
+    If necessary, the scene will automatically be downloaded from Hugging Face to your local `data/nre-artifacts/all-usdzs` directory. Ensure you have set your Hugging Face token in the `HF_TOKEN` environment variable.
+    </Note>
+  </Tab>
+  
+  <Tab title="Scene Suites">
+    ### Using Scene Suites
+    
+    Scene suites provide pre-validated collections of scenes for testing. The available suites are defined in `data/scenes/sim_suites.csv`.
+    
+    #### Public Scene Suite
+    
+    To use the public sceneset with 901 validated scenes:
+    
+    ```bash
+    alpasim_wizard +deploy=local \
+      scenes.test_suite_id=public_2507_ex_failures \
+      wizard.log_dir=$PWD/tutorial_suite
+    ```
+    
+    This will run simulations across all scenes in the `public_2507_ex_failures` suite, which excludes problematic scenes from the full 25.07 release dataset.
+    
+    <Warning>
+    Using the full public scene suite will download all 901 scenes if they are not already cached locally. This requires significant disk space and bandwidth.
+    </Warning>
+  </Tab>
+</Tabs>
+
+## Scene Data Structure
+
+The scene metadata is organized in CSV files:
+
+### sim_scenes.csv
+
+Contains information about individual scenes:
+
+| Field | Description |
+|-------|-------------|
+| `uuid` | Unique identifier for the artifact |
+| `scene_id` | Scene identifier (e.g., `clipgt-a309e228-...`) |
+| `nre_version_string` | NRE version (e.g., `25.7.9-e633dd23`) |
+| `path` | Path to the `.usdz` file in the repository |
+| `last_modified` | Last modification timestamp |
+| `artifact_repository` | Source repository (e.g., `huggingface`) |
+
+### sim_suites.csv
+
+Defines scene collections:
+
+| Field | Description |
+|-------|-------------|
+| `test_suite_id` | Suite identifier (e.g., `public_2507_ex_failures`) |
+| `scene_id` | Scene ID included in this suite |
+
+## HuggingFace Dataset
+
+Publicly available scenes are hosted on the [NVIDIA PhysicalAI HuggingFace repository](https://huggingface.co/datasets/nvidia/PhysicalAI-Autonomous-Vehicles-NuRec/tree/main/sample_set/25.07_release).
+
+<Steps>
+  <Step title="Set HuggingFace Token">
+    Ensure your HuggingFace token is set in your environment:
+    
+    ```bash
+    export HF_TOKEN=your_token_here
+    ```
+    
+    See the onboarding instructions for details on obtaining a token.
+  </Step>
+  
+  <Step title="Automatic Download">
+    When you specify a scene that doesn't exist locally, AlpaSim will automatically download it from HuggingFace:
+    
+    ```bash
+    alpasim_wizard +deploy=local \
+      wizard.log_dir=$PWD/tutorial \
+      scenes.scene_ids=['clipgt-02eadd92-02f1-46d8-86fe-a9e338fed0b6']
+    ```
+  </Step>
+  
+  <Step title="Verify Download">
+    Downloaded scenes are cached in `data/nre-artifacts/all-usdzs/` and will be reused in future runs.
+  </Step>
+</Steps>
+
+## Scene Configuration
+
+The scene cache and CSV paths are configured in `base_config.yaml`:
+
+```yaml
+scenes:
+  # Selection method (set one of these two)
+  scene_ids: null        # List of scene IDs to use
+  test_suite_id: null    # Test suite ID to use (from suites_csv)
+  
+  # Limit the number of scenes to run (0 or negative means no limit)
+  limit_to_first_n: 0
+  
+  # Paths
+  scene_cache: "${defines.filesystem}/nre-artifacts"
+  scenes_csv: "${repo-relative:'data/scenes/sim_scenes.csv'}"
+  suites_csv: "${repo-relative:'data/scenes/sim_suites.csv'}"
+```
+
+### Limiting Scene Count
+
+You can limit the number of scenes from a suite:
+
+```bash
+alpasim_wizard +deploy=local \
+  scenes.test_suite_id=public_2507_ex_failures \
+  scenes.limit_to_first_n=10 \
+  wizard.log_dir=$PWD/tutorial_limited
+```
+
+This will run only the first 10 scenes from the suite.
+
+## Artifact Compatibility
+
+AlpaSim uses a compatibility matrix to ensure scenes work with the current version:
+
+<Accordion title="Compatibility Matrix Configuration">
+```yaml
+artifact_compatibility_matrix:
+  "0_2_0":
+    "25_7_9-b85d0efd": true
+    "25_7_9-e633dd23": true
+    "25_7_8-fc8b0551": true
+    "0_2_578-e82c0193": true
+```
+
+The keys use underscores instead of dots due to Hydra limitations. The version strings are interpreted with `.replace('_', '.')`.
+
+<Note>
+You can add compatible versions ad-hoc: `scenes.artifact_compatibility_matrix.current_version.new_version=true`
+</Note>
+</Accordion>
+
+## Best Practices
+
+<Warning>
+**Scene Selection Recommendations**:
+
+- Start with individual scenes for testing and development
+- Use scene suites for comprehensive evaluation
+- Monitor disk space when downloading large scene collections
+- Verify `HF_TOKEN` is set before using HuggingFace scenes
+</Warning>
+
+<Note>
+**Performance Tip**: Downloaded scenes are cached locally. Once downloaded, subsequent runs will use the cached versions, significantly improving startup time.
+</Note>

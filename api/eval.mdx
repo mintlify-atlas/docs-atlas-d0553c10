@@ -1,0 +1,475 @@
+---
+title: Evaluation Module
+description: Metrics computation and scenario evaluation
+---
+
+The `eval` module computes driving metrics from AlpaSim simulation logs. It evaluates autonomous driving performance across safety, comfort, and progress dimensions.
+
+## Installation
+
+The eval module is installed as part of the AlpaSim workspace:
+
+```bash
+# From repository root
+./setup_local_env.sh
+source .venv/bin/activate
+```
+
+The module is located at `src/eval/src/eval/`.
+
+## Quick Start
+
+### Runtime Evaluation
+
+Evaluate during simulation:
+
+```python
+from eval.scenario_evaluator import ScenarioEvaluator
+from eval.schema import EvalConfig
+from eval.data import ScenarioEvalInput
+
+# Configure evaluation
+eval_config = EvalConfig(
+    scorers=["collision", "comfort", "progress"],
+    vehicle=vehicle_config
+)
+
+# Create evaluator
+evaluator = ScenarioEvaluator(eval_config)
+
+# Evaluate scenario (called by runtime)
+result = evaluator.evaluate(scenario_input)
+
+print(f"Collision: {result.aggregated_metrics['collision_any']}")
+print(f"Comfort: {result.aggregated_metrics['comfort_jerk_lat_mean']}")
+print(f"Progress: {result.aggregated_metrics['progress_rate']}")
+```
+
+### Post-Evaluation
+
+Evaluate from saved logs:
+
+```bash
+python -m eval \
+  --log-dir /path/to/rollouts \
+  --config configs/eval.yaml \
+  --output metrics_summary.parquet
+```
+
+## Core Classes
+
+### ScenarioEvaluator
+
+Evaluates a single scenario and returns metrics.
+
+```python
+from eval.scenario_evaluator import ScenarioEvaluator, ScenarioEvalResult
+from eval.schema import EvalConfig
+
+evaluator = ScenarioEvaluator(
+    cfg=EvalConfig(
+        scorers=["collision", "comfort", "progress"],
+        vehicle=vehicle_config
+    )
+)
+
+result: ScenarioEvalResult = evaluator.evaluate(scenario_input)
+```
+
+**Constructor:**
+
+<ParamField path="cfg" type="EvalConfig" required>
+  Evaluation configuration (scorers, vehicle parameters)
+</ParamField>
+
+**Methods:**
+
+<ResponseField name="evaluate" type="ScenarioEvalResult">
+  Compute metrics for a completed scenario
+  
+  **Args:**
+  - `scenario_input` (ScenarioEvalInput): Trajectories and metadata
+  
+  **Returns:**
+  - `ScenarioEvalResult`: Per-timestep and aggregated metrics
+</ResponseField>
+
+### ScenarioEvalResult
+
+Result container for evaluation metrics.
+
+```python
+from eval.scenario_evaluator import ScenarioEvalResult
+
+result = evaluator.evaluate(scenario_input)
+
+# Per-timestep metrics
+for metric in result.timestep_metrics:
+    print(f"{metric.name}: {metric.values}")
+
+# Aggregated metrics
+print(result.aggregated_metrics)
+# {'collision_any': 0.0, 'comfort_jerk_lat_mean': 1.23, ...}
+
+# Raw dataframe
+df = result.metrics_df
+print(df.columns)
+```
+
+<ResponseField name="timestep_metrics" type="list[MetricReturn]">
+  Per-timestep metric values and metadata
+</ResponseField>
+
+<ResponseField name="aggregated_metrics" type="dict[str, float]">
+  Aggregated metrics (one value per metric)
+</ResponseField>
+
+<ResponseField name="metrics_df" type="pl.DataFrame">
+  Polars DataFrame with all metrics and metadata
+</ResponseField>
+
+## Configuration
+
+### EvalConfig
+
+Configures which metrics to compute:
+
+```python
+from eval.schema import EvalConfig
+from alpasim_utils.scenario import VehicleConfig
+
+eval_config = EvalConfig(
+    scorers=["collision", "comfort", "progress"],
+    vehicle=VehicleConfig(
+        aabb_x_m=4.5,
+        aabb_y_m=2.0,
+        aabb_z_m=1.5
+    ),
+    video=VideoConfig(
+        render_video=False
+    )
+)
+```
+
+<ParamField path="scorers" type="list[str]" required>
+  List of scorer names to enable:
+  - `collision`: Collision detection
+  - `comfort`: Acceleration and jerk metrics
+  - `progress`: Forward progress along route
+  - `offroad`: Drivable area violations
+</ParamField>
+
+<ParamField path="vehicle" type="VehicleConfig" required>
+  Vehicle dimensions for collision checking
+</ParamField>
+
+<ParamField path="video" type="VideoConfig">
+  Video rendering configuration (for visualization)
+</ParamField>
+
+### YAML Configuration
+
+```yaml
+# eval-config.yaml
+scorers:
+  - collision
+  - comfort
+  - progress
+  - offroad
+
+vehicle:
+  aabb_x_m: 4.5
+  aabb_y_m: 2.0
+  aabb_z_m: 1.5
+  aabb_x_offset_m: -2.5
+
+video:
+  render_video: false
+  fps: 10
+  quality: 8
+```
+
+## Available Metrics
+
+### Collision Metrics
+
+Detect collisions with static and dynamic objects:
+
+```python
+from eval.scorers import create_scorer_group
+
+scorers = create_scorer_group(eval_config)
+metrics = scorers.calculate(simulation_result)
+
+# Collision metrics
+collision_any = metrics['collision_any'].aggregate()  # Binary: 0 or 1
+collision_static = metrics['collision_static'].aggregate()
+collision_dynamic = metrics['collision_dynamic'].aggregate()
+```
+
+<ResponseField name="collision_any" type="float">
+  1.0 if any collision occurred, 0.0 otherwise
+</ResponseField>
+
+<ResponseField name="collision_static" type="float">
+  1.0 if collision with static object (building, pole)
+</ResponseField>
+
+<ResponseField name="collision_dynamic" type="float">
+  1.0 if collision with dynamic object (vehicle, pedestrian)
+</ResponseField>
+
+### Comfort Metrics
+
+Measure ride comfort via acceleration and jerk:
+
+```python
+# Comfort metrics (lower is better)
+comfort_metrics = {
+    'comfort_accel_lat_mean': metrics['comfort_accel_lat_mean'].aggregate(),
+    'comfort_accel_lat_max': metrics['comfort_accel_lat_max'].aggregate(),
+    'comfort_accel_lon_mean': metrics['comfort_accel_lon_mean'].aggregate(),
+    'comfort_jerk_lat_mean': metrics['comfort_jerk_lat_mean'].aggregate(),
+    'comfort_jerk_lon_mean': metrics['comfort_jerk_lon_mean'].aggregate(),
+}
+```
+
+<ResponseField name="comfort_accel_lat_mean" type="float">
+  Mean lateral acceleration magnitude (m/s²)
+</ResponseField>
+
+<ResponseField name="comfort_accel_lon_mean" type="float">
+  Mean longitudinal acceleration magnitude (m/s²)
+</ResponseField>
+
+<ResponseField name="comfort_jerk_lat_mean" type="float">
+  Mean lateral jerk magnitude (m/s³)
+</ResponseField>
+
+<ResponseField name="comfort_jerk_lon_mean" type="float">
+  Mean longitudinal jerk magnitude (m/s³)
+</ResponseField>
+
+### Progress Metrics
+
+Track forward progress along route:
+
+```python
+progress_rate = metrics['progress_rate'].aggregate()  # [0, 1]
+progress_distance = metrics['progress_distance'].aggregate()  # meters
+```
+
+<ResponseField name="progress_rate" type="float">
+  Fraction of route completed (0.0 to 1.0)
+</ResponseField>
+
+<ResponseField name="progress_distance" type="float">
+  Total distance traveled along route (meters)
+</ResponseField>
+
+### Offroad Metrics
+
+Detect drivable area violations:
+
+```python
+offroad_any = metrics['offroad_any'].aggregate()  # Binary
+offroad_duration = metrics['offroad_duration'].aggregate()  # seconds
+```
+
+<ResponseField name="offroad_any" type="float">
+  1.0 if vehicle left drivable area
+</ResponseField>
+
+<ResponseField name="offroad_duration" type="float">
+  Total time spent off drivable area (seconds)
+</ResponseField>
+
+## CLI Tool
+
+Post-process simulation logs:
+
+```bash
+python -m eval \
+  --log-dir /path/to/rollouts \
+  --config configs/eval.yaml \
+  --output metrics_summary.parquet \
+  --render-video \
+  --num-workers 8
+```
+
+**Arguments:**
+
+<ParamField path="--log-dir" type="string" required>
+  Directory containing rollout logs (ASL files)
+</ParamField>
+
+<ParamField path="--config" type="string" required>
+  Path to eval configuration YAML
+</ParamField>
+
+<ParamField path="--output" type="string">
+  Output parquet file for aggregated metrics
+</ParamField>
+
+<ParamField path="--render-video" type="flag">
+  Render visualization videos
+</ParamField>
+
+<ParamField path="--num-workers" type="int">
+  Number of parallel workers (default: CPU count)
+</ParamField>
+
+## Data Structures
+
+### ScenarioEvalInput
+
+Input data for evaluation:
+
+```python
+from eval.data import ScenarioEvalInput
+from alpasim_utils.trajectory import Trajectory
+
+scenario_input = ScenarioEvalInput(
+    ego_trajectory=ego_traj,
+    traffic_trajectories=traffic_trajs,
+    scene_id="waymo_sf_001",
+    batch_id="batch_0",
+    run_uuid="abc-123",
+    run_name="experiment_v1",
+    vector_map=map_data
+)
+```
+
+<ParamField path="ego_trajectory" type="Trajectory" required>
+  Ego vehicle trajectory (poses over time)
+</ParamField>
+
+<ParamField path="traffic_trajectories" type="dict[str, Trajectory]" required>
+  Background actor trajectories (object_id → Trajectory)
+</ParamField>
+
+<ParamField path="scene_id" type="str" required>
+  Scene identifier
+</ParamField>
+
+<ParamField path="vector_map" type="VectorMap">
+  Road network data (for offroad detection)
+</ParamField>
+
+### MetricReturn
+
+Per-timestep metric data:
+
+```python
+from eval.data import MetricReturn
+
+metric = MetricReturn(
+    name="collision_any",
+    values=np.array([0.0, 0.0, 1.0, 1.0]),  # Per timestep
+    timestamps_us=np.array([0, 100000, 200000, 300000]),
+    aggregation_fn=np.max  # How to aggregate over time
+)
+
+aggregated = metric.aggregate()  # 1.0 (max value)
+```
+
+<ResponseField name="name" type="str">
+  Metric identifier
+</ResponseField>
+
+<ResponseField name="values" type="np.ndarray">
+  Per-timestep metric values
+</ResponseField>
+
+<ResponseField name="timestamps_us" type="np.ndarray">
+  Timestamps for each value (microseconds)
+</ResponseField>
+
+<ResponseField name="aggregation_fn" type="callable">
+  Function to aggregate values (e.g., np.mean, np.max)
+</ResponseField>
+
+## Custom Scorers
+
+Implement custom metrics by subclassing `BaseScorer`:
+
+```python
+from eval.scorers.base import BaseScorer
+from eval.data import MetricReturn, SimulationResult
+import numpy as np
+
+class MyCustomScorer(BaseScorer):
+    def __init__(self, config):
+        self.config = config
+    
+    def calculate(self, result: SimulationResult) -> list[MetricReturn]:
+        # Access simulation data
+        ego_traj = result.ego_trajectory
+        timestamps = ego_traj.timestamps_us
+        
+        # Compute custom metric
+        speeds = np.linalg.norm(ego_traj.poses.get_velocities(), axis=1)
+        
+        return [
+            MetricReturn(
+                name="my_custom_speed_mean",
+                values=speeds,
+                timestamps_us=timestamps,
+                aggregation_fn=np.mean
+            )
+        ]
+
+# Register scorer
+from eval.scorers import register_scorer
+register_scorer("my_custom", MyCustomScorer)
+
+# Use in config
+eval_config = EvalConfig(scorers=["my_custom", "collision"])
+```
+
+## Aggregation
+
+Aggregate metrics across multiple rollouts:
+
+```python
+import polars as pl
+
+# Load metrics from all rollouts
+metrics_files = list(Path("rollouts").rglob("metrics.parquet"))
+dfs = [pl.read_parquet(f) for f in metrics_files]
+all_metrics = pl.concat(dfs)
+
+# Aggregate by scene
+scene_metrics = all_metrics.group_by("scene_id").agg([
+    pl.col("collision_any").mean().alias("collision_rate"),
+    pl.col("comfort_jerk_lat_mean").mean().alias("avg_jerk"),
+    pl.col("progress_rate").mean().alias("avg_progress")
+])
+
+print(scene_metrics)
+```
+
+## Video Rendering
+
+Generate visualization videos:
+
+```python
+from eval.video import render_video_from_eval_result
+
+render_video_from_eval_result(
+    scenario_input=scenario_input,
+    metrics_df=result.metrics_df,
+    cfg=eval_config,
+    output_dir="/path/to/videos",
+    clipgt_id="waymo_sf_001",
+    batch_id="batch_0",
+    rollout_id="rollout_0"
+)
+# Generates: /path/to/videos/waymo_sf_001_batch_0_rollout_0.mp4
+```
+
+## Related
+
+- [Runtime Module](/api/runtime) - Calls evaluator during simulation
+- [Utils Module](/api/utils) - Trajectory and geometry utilities
+- [Wizard CLI](/api/wizard) - Configures evaluation settings

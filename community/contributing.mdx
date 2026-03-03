@@ -1,0 +1,136 @@
+---
+title: Contributing to AlpaSim
+description: Guidelines for contributing to the AlpaSim repository
+---
+
+We welcome contributions from the research community! This guide outlines the guidelines for anybody who wishes to contribute to the AlpaSim repository.
+
+## Code of Conduct
+
+This project follows the [NVIDIA Code of Conduct](https://images.nvidia.com/aem-dam/en-zz/Solutions/about-us/NVIDIA-Code-of-Conduct-External.pdf).
+
+## Release Process
+
+There is no formal release process for the AlpaSim repository. Once CICD pipelines are enabled, we will automate the versioning and release process, although there is no plan for formal qualification/certification of releases at this time.
+
+### Automatic Versioning
+
+Services automatically receive minor version bumps when their code changes in merge requests. This also includes rebuilding the docker container and uploading the corresponding squash file.
+
+<Warning>
+Until automatic versioning is enabled, please manually bump versions in `pyproject.toml` files when making changes.
+</Warning>
+
+### Post-merge Release Pipeline
+
+After a merge request is merged, the pipeline on main will check the following, for each package:
+
+<Steps>
+  <Step title="Check for code changes">
+    Was the code in this package changed in this commit?
+  </Step>
+  <Step title="Check for existing tag">
+    If so, does a git tag already exist for this package with the same version number?
+  </Step>
+  <Step title="Publish new version">
+    If not, this indicates a new tag will be created and the new version of the package should be published.
+  </Step>
+</Steps>
+
+## Branching and Rebasing
+
+### Fast-Forward Merges
+
+This repository is configured to require **fast-forward merges only**. This is to ensure the commit history is linear and easy to reason about.
+
+<Note>
+If you are behind main, you will be required to rebase. Force pushes are expected and necessary when rebasing due to the linear history requirement.
+</Note>
+
+### How to Rebase
+
+If you need to rebase your branch, follow these steps:
+
+```bash
+# Assuming you are checked out to your MR branch
+git fetch origin main
+git rebase origin/main
+# Be advised, the following command is a force push
+git push origin +HEAD
+```
+
+<Warning>
+A force push is required because the history has been rewritten. Try and avoid force pushing if you can, but it is necessary when rebasing.
+</Warning>
+
+## Pull Request Process
+
+<Accordion title="Before Submitting">
+- Ensure all tests pass locally
+- Run pre-commit hooks: `pre-commit run --all-files`
+- Manually bump versions in `pyproject.toml` if needed
+- Rebase onto main if your branch is behind
+</Accordion>
+
+<Accordion title="PR Requirements">
+- Merge/Pull requests are required for all changes to the codebase
+- Templates are provided to ensure consistency and completeness
+- PRs should explain scenario impact and reference issue IDs
+- Attach logs/screenshots for wizard/runtime regressions
+</Accordion>
+
+<Accordion title="Review Process">
+- Code review is required before merging
+- Address all reviewer comments
+- Ensure CI/CD pipelines pass
+- Maintain linear commit history through rebasing
+</Accordion>
+
+## Development Setup
+
+### Environment Setup
+
+Create and update your local environment:
+
+```bash
+./setup_local_env.sh
+```
+
+This uses `uv` to create `.venv`, install editable packages, compile gRPC stubs, and register pre-commit hooks.
+
+### Activate Environment
+
+```bash
+source .venv/bin/activate
+```
+
+### Running Tests
+
+```bash
+# Run fast test bundle (skips manual tests)
+uv run pytest
+
+# Target a specific module
+uv run pytest src/runtime/tests
+```
+
+### Code Quality Checks
+
+```bash
+# Run all pre-commit hooks
+pre-commit run --all-files
+
+# Type checking
+uv run mypy src/runtime
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Code Standards" icon="code" href="/community/code-standards">
+    Learn about coding standards and conventions
+  </Card>
+  <Card title="Maintainers" icon="users" href="/community/maintainers">
+    View project maintainers and roles
+  </Card>
+</CardGroup>

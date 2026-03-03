@@ -1,0 +1,135 @@
+---
+title: Design principles
+description: Core design principles and goals that guide AlpaSim's architecture and implementation
+---
+
+AlpaSim's architecture and implementation choices are guided by three core principles that prioritize practical autonomous vehicle development over traditional simulation approaches.
+
+## The three pillars
+
+### 1. Sensor fidelity
+
+AlpaSim prioritizes realistic sensor simulation using neural rendering techniques:
+
+- **Neural Rendering Engine (NRE)** for high-fidelity camera simulation
+- Focus on visual and perceptual realism over physics accuracy
+- Supports testing perception systems with realistic sensor data
+
+<Info>
+Sensor fidelity is critical for training and testing autonomous driving systems that rely heavily on camera and sensor inputs.
+</Info>
+
+### 2. Horizontal scalability
+
+The microservices architecture enables scaling based on computational needs:
+
+- Each service can be independently replicated
+- Load distribution follows computational requirements
+- Services can run on distributed hardware
+- Runtime acts as a load balancer for service replicas
+
+**Typical computational load ordering:**
+
+```
+ego policy > sensor sim > controller sim > traffic sim > physics sim
+```
+
+This means the driver (ego policy) typically requires the most computational resources, while physics simulation requires the least.
+
+<Note>
+Services can be deployed on multiple machines with the runtime coordinating communication between distributed components.
+</Note>
+
+### 3. Hackability for research
+
+AlpaSim is implemented in Python to maximize accessibility:
+
+- **Python implementation** makes the codebase accessible to researchers
+- Easy to modify and extend for custom research scenarios
+- Standard scientific Python stack (NumPy, SciPy, etc.)
+- Clear separation of concerns through microservices
+
+## Design trade-offs
+
+### What AlpaSim is NOT
+
+Understanding what AlpaSim deliberately does not prioritize is important:
+
+<Warning>
+**Non-goals:**
+- Real-time physics simulation
+- High-precision physics modeling
+- Game-engine-style graphics rendering
+</Warning>
+
+These are conscious design decisions that allow AlpaSim to excel at its core mission: providing high-fidelity sensor simulation at scale for autonomous vehicle research.
+
+### Why microservices?
+
+The microservices architecture was chosen specifically to enable:
+
+1. **Independent scaling** - Scale expensive services (like NRE) without scaling everything
+2. **Flexible deployment** - Run services on appropriate hardware (GPUs for rendering, CPUs for physics)
+3. **Development velocity** - Teams can work on services independently
+4. **Technology choice** - Each service can use appropriate tools and libraries
+
+### Why Python?
+
+Python was chosen despite performance considerations because:
+
+1. **Research accessibility** - Most ML/AV researchers use Python
+2. **Rapid prototyping** - Quick iteration on new features
+3. **Rich ecosystem** - NumPy, SciPy, PyTorch, etc.
+4. **gRPC overhead dominates** - Network I/O is the bottleneck, not language speed
+
+<Info>
+The microservices communicate via gRPC, which provides efficient serialization and cross-language compatibility if needed.
+</Info>
+
+### Why gRPC?
+
+gRPC was selected for service communication:
+
+- Efficient binary serialization with Protocol Buffers
+- Strong typing through `.proto` definitions
+- Built-in support for streaming
+- Language-agnostic (allows future non-Python services)
+- Battle-tested in production systems
+
+## Implementation consequences
+
+### Runtime as central hub
+
+Placing the runtime at the center has specific implications:
+
+**Advantages:**
+- Synchronized logging of all simulation data
+- Centralized load balancing
+- Simple service discovery model
+
+**Trade-offs:**
+- Runtime is as I/O intensive as all services combined
+- Runtime becomes a potential bottleneck
+- Requires careful attention to runtime performance
+
+### Service isolation
+
+Services are designed as isolated daemons:
+
+- Services are **servers** that respond to requests
+- Runtime is the only **client** that makes requests
+- Services have no knowledge of each other
+- All coordination happens through the runtime
+
+This isolation simplifies deployment and testing but requires the runtime to orchestrate all interactions.
+
+## Design validation
+
+These design principles are validated through:
+
+1. **Scalability testing** - Ability to run multiple scenarios in parallel
+2. **Research adoption** - Ease of customization for research projects
+3. **Sensor quality metrics** - Fidelity of rendered sensor data
+4. **Developer velocity** - Speed of implementing new features
+
+The architecture continues to evolve based on real-world usage and research needs.

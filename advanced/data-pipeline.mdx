@@ -1,0 +1,375 @@
+---
+title: 'Data Pipeline'
+description: 'Understanding ASL logs, data formats, and simulation output processing'
+---
+
+## Overview
+
+AlpaSim's data pipeline centers around **ASL (AlpaSim Log)** files, which capture the complete state of a simulation for analysis, evaluation, and replay.
+
+## ASL Log Files
+
+### What are ASL Logs?
+
+ASL files are **size-delimited protobuf streams** with a custom schema defined in [logging.proto](https://github.com/NVlabs/alpasim/blob/main/src/grpc/alpasim_grpc/v0/logging.proto).
+
+**Location**: `rollouts/{scene_id}/{batch_uuid}/rollout.asl`
+
+Each rollout creates its own ASL file containing the full simulation history.
+
+### Message Types
+
+ASL files contain three types of messages:
+
+<Accordion title="1. Metadata Header (RolloutMetadata)">
+Provides reproducibility and bookkeeping information:
+
+**Session Metadata**:
+- `session_uuid` - Unique identifier for the rollout
+- `scene_id` - Scene identifier (e.g., `clipgt-026d6a39...`)
+- `batch_size` - Number of rollouts in the batch
+- `n_sim_steps` - Total simulation steps (e.g., 120 for 20s at 10Hz)
+- `start_timestamp_us` - Scenario start timestamp
+- `control_timestep_us` - Control frequency in microseconds
+
+**Version Information**:
+- `runtime_version` - Runtime version, git hash, API version
+- `egodriver_version` - Driver version and API compatibility
+- Other service versions (physics, controller, etc.)
+
+**Actor Definitions**:
+- Initial actor configurations and properties
+</Accordion>
+
+<Accordion title="2. Actor Poses (ActorPoses)">
+Location of all actors (including `'EGO'`) in global coordinate space:
+
+**Per Actor**:
+- Position (x, y, z) in global frame
+- Orientation (quaternion)
+- Velocity (linear and angular)
+- Timestamp (microseconds)
+
+**Frequency**: Recorded at each simulation step
+
+**Use Cases**:
+- Trajectory analysis
+- Collision detection validation
+- Visualization and video rendering
+</Accordion>
+
+<Accordion title="3. Microservice Requests & Responses">
+Enables reproducing behavior of services in replay mode:
+
+**Request Types**:
+- `RolloutCameraImage` - Camera frame requests (used to create MP4 videos)
+- `DriverPlanRequest` - Driver planning inputs
+- `PhysicsUpdateRequest` - Physics simulation calls
+- `SensorsimRenderRequest` - Neural rendering requests
+
+**Response Types**:
+- Corresponding `*_return` messages with service outputs
+
+**Use Cases**:
+- Debugging service behavior
+- Replaying stimuli without full simulator
+- Validating determinism
+</Accordion>
+
+<Warning>
+The simulation header doesn't specify the USDZ file UUID - you must match scenes by `scene_id` from metadata.
+</Warning>
+
+## Reading ASL Logs
+
+### Async Stream Reading
+
+`alpasim-grpc` provides `async_read_pb_log` for reading ASL logs as a stream of messages.
+
+<CodeGroup>
+```python Basic Usage
+from alpasim_grpc.utils.logs import async_read_pb_log
+
+i = 0
+async for log_entry in async_read_pb_log("path/to/rollout.asl"):
+    print(log_entry)
+    i += 1
+    if i == 20:
+        break
+```
+
+```python Extract Metadata
+from alpasim_grpc.utils.logs import async_read_pb_log
+
+async for log_entry in async_read_pb_log("rollout.asl"):
+    if log_entry.HasField('rollout_metadata'):
+        metadata = log_entry.rollout_metadata
+        print(f"Scene: {metadata.session_metadata.scene_id}")
+        print(f"Steps: {metadata.session_metadata.n_sim_steps}")
+        print(f"Control rate: {metadata.session_metadata.control_timestep_us}us")
+        break
+```
+
+```python Extract Actor Trajectories
+from alpasim_grpc.utils.logs import async_read_pb_log
+import pandas as pd
+
+trajectory_data = []
+
+async for log_entry in async_read_pb_log("rollout.asl"):
+    if log_entry.HasField('actor_poses'):
+        poses = log_entry.actor_poses
+        for actor_id, pose in poses.poses.items():
+            trajectory_data.append({
+                'actor_id': actor_id,
+                'timestamp_us': poses.timestamp_us,
+                'x': pose.position.x,
+                'y': pose.position.y,
+                'z': pose.position.z,
+            })
+
+df = pd.DataFrame(trajectory_data)
+print(df[df['actor_id'] == 'EGO'])  # Ego vehicle trajectory
+```
+
+```python Extract Camera Images
+from alpasim_grpc.utils.logs import async_read_pb_log
+from PIL import Image
+import io
+
+frame_count = 0
+
+async for log_entry in async_read_pb_log("rollout.asl"):
+    if log_entry.HasField('rollout_camera_image_return'):
+        camera_return = log_entry.rollout_camera_image_return
+        
+        # Decode JPEG bytes to image
+        img = Image.open(io.BytesIO(camera_return.image_bytes))
+        img.save(f"frame_{frame_count:04d}.jpg")
+        frame_count += 1
+        
+        if frame_count >= 10:
+            break
+```
+</CodeGroup>
+
+<Note>
+`async_read_pb_log` is an async function - it must be executed from a Jupyter notebook or submitted to an async runtime loop.
+</Note>
+
+### Example Output
+
+When you print log entries, you'll see protobuf messages:
+
+```protobuf
+rollout_metadata {
+  session_metadata {
+    session_uuid: "a5823758-a782-11ef-aa43-0242c0a89003"
+    scene_id: "clipgt-3055a5c9-53e8-4e20-b41a-19c0f917b081"
+    batch_size: 1
+    n_sim_steps: 120
+    start_timestamp_us: 1689697803493732
+    control_timestep_us: 99000
+  }
+  actor_definitions {
+    # ...
+  }
+  force_gt_duration: 1700000
+  version_ids {
+    runtime_version {
+      version_id: "0.3.0"
+      git_hash: "83bf78502c43dabac683d68b3712cdca17f6a810+dirty"
+      grpc_api_version {
+        minor: 24
+      }
+    }
+    # ...
+  }
+}
+```
+
+## Replaying Stimuli
+
+ASL logs enable **replay debugging** - reproducing driver behavior without running the full simulator.
+
+### Replay Workflow
+
+<Steps>
+  <Step title="Extract stimuli from ASL">
+    Read camera frames and ego poses from the log:
+    ```python
+    async for log_entry in async_read_pb_log("rollout.asl"):
+        if log_entry.HasField('driver_plan_request'):
+            request = log_entry.driver_plan_request
+            # Extract: request.images, request.ego_pose, etc.
+    ```
+  </Step>
+  
+  <Step title="Instantiate driver">
+    Create a driver instance:
+    ```python
+    from alpasim_driver.main import create_driver
+    driver = create_driver(config)
+    ```
+  </Step>
+  
+  <Step title="Replay requests">
+    Call driver with extracted stimuli:
+    ```python
+    for request in extracted_requests:
+        response = driver.plan(request)
+        # Attach debugger, add breakpoints, analyze output
+    ```
+  </Step>
+</Steps>
+
+### Replay Notebook Example
+
+The [replay_logs_alpamodel.ipynb](https://github.com/NVlabs/alpasim/blob/main/src/runtime/notebooks/replay_logs_alpamodel.ipynb) notebook demonstrates:
+1. Reading an ASL log
+2. Extracting driver stimuli (camera frames, ego poses)
+3. Replaying them on a driver instance
+4. Reproducing behavior with a debugger attached
+
+**Use cases**:
+- Debug non-deterministic driver behavior
+- Test driver changes on historical logs
+- Validate driver outputs match expectations
+
+## Evaluation Data Pipeline
+
+### Per-Rollout Metrics
+
+**Location**: `rollouts/{scene_id}/{batch_uuid}/metrics.parquet`
+
+Parquet file containing driving quality metrics for the rollout:
+- Safety metrics (collisions, offroad)
+- Performance metrics (trajectory deviation, duration)
+- Incident rates
+
+See [Performance & Operations](/advanced/operations#understanding-driving-quality-metrics) for metric definitions.
+
+### Aggregated Metrics
+
+**Location**: `aggregate/metrics_unprocessed.parquet`
+
+Combined metrics from all rollouts, used to generate:
+- `aggregate/metrics_results.txt` - Formatted statistics table
+- `aggregate/metrics_results.png` - Visual summary plots
+
+### Video Generation
+
+Evaluation videos are created from ASL logs using `RolloutCameraImage` messages.
+
+**Per-rollout videos**:
+- `rollouts/{scene_id}/{batch_uuid}/{clipgt_id}_{batch_id}_{rollout_id}.mp4`
+
+**Aggregated videos**:
+- `aggregate/videos/all/` - All rollout videos
+- `aggregate/videos/violations/collision_at_fault/` - At-fault collision videos
+- `aggregate/videos/violations/offroad/` - Off-road violation videos
+- `aggregate/videos/violations/dist_to_gt_trajectory/` - Large deviation videos
+
+<Note>
+Videos in `violations/` folders are symlinks to videos in `all/` for easy filtering by failure type.
+</Note>
+
+## Indexed Rollouts
+
+### RCLog Format
+
+Some rollouts generate indexed logs for easier random access:
+
+**Location**: `rollouts/{scene_id}/{batch_uuid}/rollout_indexed/`
+
+Contents:
+- `rclog-all-indexed.log` - Indexed log data
+- `rclog-all.index` - Index for random access
+- `manifest.json` - Metadata about indexed data
+- `camera_front_tele_30fov.mp4` - Per-camera video streams
+- `camera_front_wide_120fov.mp4`
+
+This format enables faster seeking and visualization tools.
+
+## Data Processing Examples
+
+### Batch Process All Rollouts
+
+<CodeGroup>
+```python Process All ASL Logs
+import asyncio
+from pathlib import Path
+from alpasim_grpc.utils.logs import async_read_pb_log
+import pandas as pd
+
+async def extract_trajectory(asl_path):
+    """Extract ego trajectory from ASL log."""
+    trajectory = []
+    
+    async for log_entry in async_read_pb_log(str(asl_path)):
+        if log_entry.HasField('actor_poses'):
+            ego_pose = log_entry.actor_poses.poses.get('EGO')
+            if ego_pose:
+                trajectory.append({
+                    'timestamp_us': log_entry.actor_poses.timestamp_us,
+                    'x': ego_pose.position.x,
+                    'y': ego_pose.position.y,
+                })
+    
+    return pd.DataFrame(trajectory)
+
+async def process_all_rollouts(rollouts_dir):
+    """Process all ASL logs in rollouts directory."""
+    asl_files = Path(rollouts_dir).rglob('rollout.asl')
+    
+    tasks = [extract_trajectory(asl_file) for asl_file in asl_files]
+    trajectories = await asyncio.gather(*tasks)
+    
+    return trajectories
+
+# Run from Jupyter or async context
+trajectories = await process_all_rollouts('tutorial/rollouts')
+```
+</CodeGroup>
+
+### Combine with Metrics
+
+<CodeGroup>
+```python Join Trajectories with Metrics
+import pandas as pd
+from pathlib import Path
+
+def load_all_metrics(rollouts_dir):
+    """Load all per-rollout metrics."""
+    metrics_files = Path(rollouts_dir).rglob('metrics.parquet')
+    
+    dfs = []
+    for metrics_file in metrics_files:
+        df = pd.read_parquet(metrics_file)
+        # Add rollout identifier
+        df['rollout_path'] = str(metrics_file.parent)
+        dfs.append(df)
+    
+    return pd.concat(dfs, ignore_index=True)
+
+metrics_df = load_all_metrics('tutorial/rollouts')
+
+# Filter to failed rollouts
+failed = metrics_df[metrics_df['collision_at_fault'] == 1]
+print(f"Found {len(failed)} failed rollouts")
+print(failed[['rollout_path', 'dist_to_gt_trajectory', 'duration_frac_20s']])
+```
+</CodeGroup>
+
+## Data Schema Reference
+
+All protobuf message schemas are defined in `src/grpc/alpasim_grpc/v0/`:
+
+- **logging.proto** - ASL log message types
+- **common.proto** - Shared types (poses, trajectories, timestamps)
+- **egodriver.proto** - Driver request/response schemas
+- **sensorsim.proto** - Rendering request/response schemas
+- **physics.proto** - Physics update schemas
+- **controller.proto** - Controller interface schemas
+
+See [Custom Components - Protocol Buffers](/advanced/custom-components#protocol-buffer-definitions) for usage examples.

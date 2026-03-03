@@ -1,0 +1,165 @@
+---
+title: Controller Service
+description: Vehicle dynamics controller and state propagation API
+---
+
+The Controller Service (`VDCService`) provides vehicle dynamics simulation and control. It propagates vehicle state forward in time using a controller and vehicle model.
+
+## Service Definition
+
+```protobuf
+service VDCService {
+  rpc get_version(common.Empty) returns (common.VersionId);
+  rpc start_session (VDCSessionRequest) returns (common.SessionRequestStatus);
+  rpc close_session (VDCSessionCloseRequest) returns (common.Empty);
+  rpc run_controller_and_vehicle(RunControllerAndVehicleModelRequest)
+      returns (RunControllerAndVehicleModelResponse);
+  rpc shut_down(common.Empty) returns (common.Empty);
+}
+```
+
+## Methods
+
+### start_session
+
+Initialize a controller session with vehicle configuration.
+
+<ParamField body="session_uuid" type="string" required>
+  Unique identifier for this session
+</ParamField>
+
+<ParamField body="vehicle_and_controller_params" type="VehicleAndControllerParams" required>
+  Vehicle and controller configuration
+  
+  <Expandable title="VehicleAndControllerParams">
+    <ParamField body="rig_file" type="string" required>
+      Path to rig configuration file defining vehicle parameters
+    </ParamField>
+    
+    <ParamField body="amend_files" type="string[]">
+      Optional configuration override files
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="status" type="SessionRequestStatus">
+  Empty message indicating session started successfully
+</ResponseField>
+
+### run_controller_and_vehicle
+
+Propagate vehicle state forward in time using the controller and vehicle model.
+
+<ParamField body="session_uuid" type="string" required>
+  Session identifier from `start_session`
+</ParamField>
+
+<ParamField body="state" type="StateAtTime" required>
+  Current vehicle state
+  
+  - `state.pose`: Active transform local→rig (rig frame origin)
+  - Angular and linear rates resolved in rig frame
+</ParamField>
+
+<ParamField body="planned_trajectory_in_rig" type="Trajectory" required>
+  Desired trajectory expressed in rig frame at the timestamp of the first pose.
+  Each pose is relative to the rig origin.
+</ParamField>
+
+<ParamField body="future_time_us" type="int64" required>
+  Target timestamp (microseconds) at the end of propagation
+</ParamField>
+
+<ParamField body="coerce_dynamic_state" type="bool">
+  During initialization/replay phase, match dynamic state in vehicle model to prevent drift.
+  Set to `true` during the priming phase at simulation start.
+</ParamField>
+
+<ResponseField name="pose_local_to_rig" type="PoseAtTime">
+  Ground-truth active transform local→rig after propagation
+</ResponseField>
+
+<ResponseField name="pose_local_to_rig_estimated" type="PoseAtTime">
+  Estimated active transform local→rig after propagation (may include sensor noise)
+</ResponseField>
+
+<ResponseField name="dynamic_state" type="DynamicState">
+  Ground-truth velocity and acceleration in rig frame after propagation
+</ResponseField>
+
+<ResponseField name="dynamic_state_estimated" type="DynamicState">
+  Estimated velocity and acceleration in rig frame (may include sensor noise)
+</ResponseField>
+
+### close_session
+
+Release resources associated with a session.
+
+<ParamField body="session_uuid" type="string" required>
+  Session identifier to close
+</ParamField>
+
+## Usage Example
+
+From `alpasim_runtime/services/controller_service.py`:
+
+```python
+from alpasim_grpc.v0 import controller_pb2, controller_pb2_grpc
+from alpasim_grpc.v0.common_pb2 import StateAtTime, Trajectory
+
+# Initialize session
+session_request = controller_pb2.VDCSessionRequest(
+    session_uuid="my-session-uuid",
+    vehicle_and_controller_params=controller_pb2.VDCSessionRequest.VehicleAndControllerParams(
+        rig_file="/path/to/rig.yaml",
+        amend_files=[]
+    )
+)
+status = controller_stub.start_session(session_request)
+
+# Propagate vehicle state
+request = controller_pb2.RunControllerAndVehicleModelRequest(
+    session_uuid="my-session-uuid",
+    state=current_state,
+    planned_trajectory_in_rig=desired_trajectory,
+    future_time_us=future_timestamp,
+    coerce_dynamic_state=False
+)
+
+response = controller_stub.run_controller_and_vehicle(request)
+print(f"New pose: {response.pose_local_to_rig}")
+print(f"Dynamic state: {response.dynamic_state}")
+
+# Clean up
+controller_stub.close_session(
+    controller_pb2.VDCSessionCloseRequest(session_uuid="my-session-uuid")
+)
+```
+
+## Configuration
+
+The rig file specifies vehicle parameters such as:
+
+- Vehicle mass and inertia
+- Wheel parameters
+- Controller gains (MPC parameters)
+- Actuator limits
+
+See the source repository's `configs/` directory for example rig files.
+
+## Coordinate Frames
+
+<Note>
+  The **rig frame** origin is at the mid-bottom rear edge of the vehicle bounding box.
+  
+  - X: Forward (vehicle heading)
+  - Y: Left
+  - Z: Up
+  
+  The controller operates in this frame for vehicle dynamics calculations.
+</Note>
+
+## Related
+
+- [Runtime Python Module](/api/runtime) - Integrates controller service
+- [Driver Service](/api/grpc/driver) - Provides planned trajectories

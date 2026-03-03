@@ -1,0 +1,483 @@
+---
+title: Wizard CLI Tool
+description: Configuration, deployment, and orchestration tool for AlpaSim
+---
+
+The Wizard CLI (`alpasim_wizard`) is AlpaSim's configuration and deployment tool. It generates service configurations, manages Docker containers, and orchestrates distributed simulations.
+
+## Installation
+
+The wizard is installed as part of the AlpaSim workspace:
+
+```bash
+# From repository root
+./setup_local_env.sh
+source .venv/bin/activate
+```
+
+## Usage
+
+The wizard is invoked with a YAML configuration file:
+
+```bash
+python -m alpasim_wizard --config path/to/config.yaml
+```
+
+## Configuration File
+
+The wizard configuration is structured using OmegaConf/Hydra:
+
+```yaml
+# config.yaml
+defines:
+  ALPASIM_ROOT: "/path/to/alpasim"
+  LOG_ROOT: "/path/to/logs"
+
+wizard:
+  run_name: "my_experiment"
+  run_method: "docker_compose"  # or "slurm", "none"
+  run_mode: "batch"              # or "attach_bash", "attach_vscode"
+  log_level: "INFO"
+  log_dir: "${LOG_ROOT}/runs/${wizard.run_name}"
+  baseport: 50000
+  dry_run: false
+  latest_symlink: true
+
+scenes:
+  test_suite_id: "validation_set_v1"
+  # OR: scene_ids: ["scene_001", "scene_002"]
+  limit_to_first_n: 0  # 0 = no limit
+  scene_cache: "/data/scenes"
+  scenes_csv: "${ALPASIM_ROOT}/data/sim_scenes.csv"
+  suites_csv: "${ALPASIM_ROOT}/data/sim_suites.csv"
+
+services:
+  driver:
+    image: "alpasim/driver:latest"
+    instances: 4
+    gpus_per_instance: 0
+    
+  sensorsim:
+    image: "alpasim/sensorsim:latest"
+    instances: 2
+    gpus_per_instance: 1
+    
+  physics:
+    image: "alpasim/physics:latest"
+    instances: 2
+    gpus_per_instance: 0
+    
+  trafficsim:
+    image: "alpasim/traffic:latest"
+    instances: 1
+    gpus_per_instance: 1
+    
+  controller:
+    image: "alpasim/controller:latest"
+    instances: 4
+    gpus_per_instance: 0
+    
+  runtime:
+    image: "alpasim/runtime:latest"
+    instances: 1
+    cpus_per_instance: 8
+    env:
+      PYTHONUNBUFFERED: "1"
+
+runtime:
+  enable_rendering: true
+  enable_eval: true
+  physics_update_mode: "once_per_step"
+  vehicle:
+    aabb_x_m: 4.5
+    aabb_y_m: 2.0
+    aabb_z_m: 1.5
+  cameras:
+    - logical_id: "camera_front_wide_120fov"
+      height: 720
+      width: 1280
+      frame_interval_us: 33000
+
+eval:
+  scorers:
+    - collision
+    - comfort
+    - progress
+  video:
+    render_video: false
+```
+
+## Configuration Sections
+
+### Wizard Section
+
+<ParamField path="run_name" type="string" required>
+  Unique identifier for this experiment run
+</ParamField>
+
+<ParamField path="run_method" type="RunMethod" required>
+  Deployment method:
+  - `docker_compose`: Docker Compose orchestration
+  - `slurm`: SLURM cluster deployment
+  - `none`: Generate configs without running
+</ParamField>
+
+<ParamField path="run_mode" type="RunMode">
+  Execution mode:
+  - `batch`: Normal batch processing
+  - `attach_bash`: Interactive bash session in container
+  - `attach_vscode`: VSCode remote debugging
+</ParamField>
+
+<ParamField path="log_dir" type="string" required>
+  Output directory for logs, configs, and results
+</ParamField>
+
+<ParamField path="log_level" type="string">
+  Global log level: `DEBUG`, `INFO`, `WARNING`, `ERROR`
+</ParamField>
+
+<ParamField path="baseport" type="int" required>
+  Starting port for service allocation (increments for each service)
+</ParamField>
+
+<ParamField path="external_services" type="dict[str, list[str]]" optional>
+  External service addresses (for hybrid local/container setups)
+  
+  ```yaml
+  external_services:
+    driver: ["localhost:6789"]
+  ```
+</ParamField>
+
+### Scenes Section
+
+<ParamField path="test_suite_id" type="string">
+  Test suite identifier from `suites_csv` (mutually exclusive with `scene_ids`)
+</ParamField>
+
+<ParamField path="scene_ids" type="list[string]">
+  Explicit list of scene IDs to simulate (mutually exclusive with `test_suite_id`)
+</ParamField>
+
+<ParamField path="limit_to_first_n" type="int">
+  Limit number of scenes (0 = no limit)
+</ParamField>
+
+<ParamField path="scene_cache" type="string" required>
+  Directory containing scene USDZ files
+</ParamField>
+
+<ParamField path="local_usdz_dir" type="string" optional>
+  Local directory with USDZ files (bypasses CSV files)
+</ParamField>
+
+### Services Section
+
+Each service has similar configuration:
+
+<ParamField path="image" type="string" required>
+  Docker image name and tag
+</ParamField>
+
+<ParamField path="instances" type="int" required>
+  Number of service instances (for load balancing)
+</ParamField>
+
+<ParamField path="gpus_per_instance" type="int">
+  GPUs to allocate per instance (default: 0)
+</ParamField>
+
+<ParamField path="cpus_per_instance" type="int">
+  CPUs to allocate per instance (default: 4)
+</ParamField>
+
+<ParamField path="mem_gb" type="int">
+  Memory in GB (SLURM only)
+</ParamField>
+
+<ParamField path="env" type="dict[string, string]">
+  Environment variables for the service
+</ParamField>
+
+## Core Functionality
+
+### AlpasimWizard Class
+
+Main entry point for the wizard:
+
+```python
+from alpasim_wizard.schema import AlpasimConfig
+from alpasim_wizard.wizard import AlpasimWizard
+from alpasim_wizard.setup_omegaconf import main_wrapper
+
+def run_wizard(cfg: AlpasimConfig) -> None:
+    wizard = AlpasimWizard.create(cfg)
+    wizard.cast()  # Execute deployment
+
+main_wrapper(run_wizard)  # Load config and call run_wizard
+```
+
+**Methods:**
+
+<ResponseField name="create" type="staticmethod">
+  Factory method to create wizard from configuration
+</ResponseField>
+
+<ResponseField name="cast" type="method">
+  Main execution method:
+  1. Clone driver code (if configured)
+  2. Generate Docker Compose / SLURM configs
+  3. Deploy services based on run_method
+</ResponseField>
+
+<ResponseField name="maybe_clone_driver_code" type="method">
+  Clone driver repository to log directory if `driver_code_hash` is set
+</ResponseField>
+
+### WizardContext
+
+Shared context for wizard operations:
+
+```python
+from alpasim_wizard.context import WizardContext
+
+context = WizardContext.create(cfg)
+
+print(context.run_uuid)           # Unique run identifier
+print(context.service_manager)    # Service configuration manager
+print(context.cfg)                # Parsed AlpasimConfig
+```
+
+### ConfigurationManager
+
+Generates service-specific configurations:
+
+```python
+from alpasim_wizard.configuration import ConfigurationManager
+
+config_manager = ConfigurationManager(log_dir)
+config_manager.generate_all(container_set, context)
+
+# Generates:
+# - generated-network-config.yaml (service endpoints)
+# - runtime-config.yaml (runtime parameters)
+# - eval-config.yaml (evaluation settings)
+```
+
+## Deployment Methods
+
+### Docker Compose
+
+Generates `docker-compose.yaml` and `run.sh`:
+
+```bash
+python -m alpasim_wizard --config config.yaml
+# Outputs:
+# - ${log_dir}/docker-compose.yaml
+# - ${log_dir}/run.sh
+
+# Services start automatically with run_method: docker_compose
+# Or manually:
+cd ${log_dir}
+./run.sh
+```
+
+### SLURM
+
+Generates SLURM batch scripts and submits jobs:
+
+```yaml
+wizard:
+  run_method: "slurm"
+  slurm_gpu_partition: "gpu_short"
+  slurm_cpu_partition: "cpu_short"
+```
+
+```bash
+python -m alpasim_wizard --config config.yaml
+# Submits SLURM jobs for each service
+# Outputs job IDs and status
+```
+
+### None (Config Only)
+
+Generate configurations without running:
+
+```yaml
+wizard:
+  run_method: "none"
+```
+
+```bash
+python -m alpasim_wizard --config config.yaml
+# Generates configs in ${log_dir}
+# Run manually: ${log_dir}/run.sh
+```
+
+## Advanced Features
+
+### Debug Flags
+
+Enable debugging features:
+
+```yaml
+wizard:
+  debug_flags:
+    use_localhost: true  # Use localhost instead of container names
+```
+
+### Driver Code Cloning
+
+Clone specific driver version:
+
+```yaml
+wizard:
+  driver_code_repo: "git@gitlab.com:company/driver.git"
+  driver_code_hash: "abc123def456"
+```
+
+Cloned to `${log_dir}/driver_code/`.
+
+### Hybrid Deployments
+
+Run some services locally, others in containers:
+
+```yaml
+wizard:
+  external_services:
+    driver: ["localhost:6789"]  # Driver running on host
+  debug_flags:
+    use_localhost: true
+
+services:
+  driver:
+    instances: 0  # Don't start driver container
+```
+
+### Scene Selection
+
+<CodeGroup>
+```yaml Test Suite
+scenes:
+  test_suite_id: "validation_v1"
+  suites_csv: "data/sim_suites.csv"
+  scenes_csv: "data/sim_scenes.csv"
+```
+
+```yaml Explicit Scenes
+scenes:
+  scene_ids:
+    - "waymo_sf_001"
+    - "waymo_sf_002"
+    - "waymo_phx_015"
+  scenes_csv: "data/sim_scenes.csv"
+```
+
+```yaml Local USDZ Directory
+scenes:
+  local_usdz_dir: "/data/my_scenes"
+  # Automatically creates "local" test suite
+```
+</CodeGroup>
+
+## Generated Files
+
+The wizard creates the following structure in `${log_dir}`:
+
+```
+${log_dir}/
+├── docker-compose.yaml          # Container orchestration
+├── run.sh                       # Startup script
+├── generated-network-config.yaml # Service endpoints
+├── runtime-config.yaml          # Runtime parameters
+├── eval-config.yaml             # Evaluation settings
+├── driver_code/                 # Cloned driver (if configured)
+├── logs/                        # Service logs
+└── rollouts/                    # Simulation outputs
+    ├── scene_001/
+    │   ├── batch_0/
+    │   │   ├── rollout_0/
+    │   │   │   ├── simulation.asl
+    │   │   │   └── metrics.parquet
+```
+
+## Output Structure
+
+Simulation results follow this hierarchy:
+
+- **rollouts/**: Top-level output directory
+  - **{scene_id}/**: Per-scene directory
+    - **batch_{i}/**: Batch of parallel rollouts
+      - **rollout_{j}/**: Individual rollout
+        - `simulation.asl`: AlpaSim Simulation Log
+        - `metrics.parquet`: Evaluation metrics
+        - `*.jpg`: Rendered images (if enabled)
+
+## CLI Arguments
+
+```bash
+python -m alpasim_wizard \
+  --config config.yaml \
+  --overrides "wizard.run_name=experiment_v2" \
+              "runtime.enable_rendering=false"
+```
+
+<ParamField path="--config" type="string" required>
+  Path to YAML configuration file
+</ParamField>
+
+<ParamField path="--overrides" type="string...">
+  Hydra-style configuration overrides
+</ParamField>
+
+## Example Workflows
+
+<CodeGroup>
+```bash Local Development
+# Use local services with debugging
+python -m alpasim_wizard \
+  --config configs/local_dev.yaml \
+  --overrides "wizard.run_method=none" \
+              "wizard.debug_flags.use_localhost=true"
+
+# Manually start services
+cd ${log_dir}
+./run.sh
+```
+
+```bash Production Run
+# Full cluster deployment
+python -m alpasim_wizard \
+  --config configs/production.yaml \
+  --overrides "wizard.run_method=slurm" \
+              "scenes.test_suite_id=full_validation_v2"
+```
+
+```bash Quick Test
+# Single scene, minimal rendering
+python -m alpasim_wizard \
+  --config configs/quick_test.yaml \
+  --overrides "scenes.scene_ids=[waymo_sf_001]" \
+              "runtime.enable_rendering=false" \
+              "scenes.limit_to_first_n=1"
+```
+</CodeGroup>
+
+## Environment Variables
+
+The wizard respects these environment variables:
+
+<ParamField path="SLURM_JOB_ID" type="string">
+  Automatically set by SLURM (used for job tracking)
+</ParamField>
+
+<ParamField path="SLURM_JOB_ACCOUNT" type="string">
+  SLURM account for GPU partition (if not overridden in config)
+</ParamField>
+
+## Related
+
+- [Runtime Module](/api/runtime) - Executed by wizard
+- [Evaluation Module](/api/eval) - Configured by wizard
+- [gRPC Services](/api/grpc/overview) - Deployed by wizard

@@ -1,0 +1,439 @@
+---
+title: Evaluation Metrics and Video Layouts
+description: Understanding AlpaSim evaluation metrics, video generation, and performance analysis
+---
+
+AlpaSim provides comprehensive evaluation capabilities to assess driving quality, safety, and performance. The evaluation system computes detailed metrics and generates visualization videos to help understand autonomous driving behavior.
+
+## Evaluation Modes
+
+AlpaSim supports two evaluation modes:
+
+<Tabs>
+  <Tab title="In-Runtime Evaluation (Default)">
+    By default, evaluation runs within the runtime after each rollout completes. This provides immediate feedback and is suitable for most use cases.
+    
+    ```yaml
+    eval:
+      run_in_runtime: true
+    ```
+    
+    <Note>
+    No additional configuration needed - this is the default mode.
+    </Note>
+  </Tab>
+  
+  <Tab title="Separate Job Evaluation">
+    For large-scale evaluations or resource-constrained environments, you can run evaluation in a separate container:
+    
+    ```bash
+    alpasim_wizard +deploy=local \
+      +eval=eval_in_separate_job \
+      wizard.log_dir=$PWD/tutorial
+    ```
+    
+    This uses dedicated `eval` and `post_eval_aggregation` services defined in the configuration.
+  </Tab>
+</Tabs>
+
+## Metrics Computation
+
+AlpaSim computes multiple categories of metrics to evaluate driving performance:
+
+### Safety Metrics
+
+Binary metrics indicating pass (0) or fail (1):
+
+<Accordion title="Collision Metrics">
+**collision_at_fault**: Driver caused a collision (front/lateral impact)
+
+**collision_rear**: Rear-end collision (not at fault)
+
+**collision_front**: Front collision detection
+
+**collision_lateral**: Side collision detection
+
+**collision_any**: Any collision occurred
+
+These metrics are computed by analyzing vehicle trajectories and detecting overlaps between the ego vehicle and other agents.
+</Accordion>
+
+<Accordion title="Road Compliance">
+**offroad**: Vehicle drove off the designated road surface
+
+**offroad_or_collision_at_fault**: Combined metric for any critical safety violation
+
+Computed using the vehicle polygon and road geometry from the map data.
+</Accordion>
+
+### Performance Metrics
+
+Continuous metrics measuring driving quality:
+
+<Accordion title="Trajectory Deviation">
+**dist_to_gt_trajectory**: Maximum distance from ground truth path (meters)
+- Lower is better
+- Indicates how closely the driver follows expected routes
+- Aggregated using MAX over time (worst deviation during the drive)
+
+**dist_to_gt_location**: Distance to ground truth at each timestep
+
+Configuration:
+```yaml
+eval:
+  aggregation_modifiers:
+    max_dist_to_gt_trajectory: 4.0  # Threshold in meters
+```
+</Accordion>
+
+<Accordion title="Progress Metrics">
+**progress**: Absolute distance traveled along the route
+
+**progress_rel**: Relative progress compared to ground truth
+
+**duration_frac_20s**: Fraction of 20s drive completed before any failure
+- 1.0 = completed full 20s without issues
+- Less than 1.0 = failed early (collision, off-road, or excessive deviation)
+</Accordion>
+
+<Accordion title="Plan Quality (MinADE)">
+Minimum Average Displacement Error at various time horizons:
+
+```yaml
+eval:
+  scorers:
+    min_ade:
+      time_deltas: [0.5, 1.0, 2.5, 5.0]  # seconds
+      incl_z: false  # Exclude vertical dimension
+      target: GT     # Compare to ground truth (or "SELF")
+```
+
+Measures how accurately the predicted trajectory matches the actual trajectory at different prediction horizons.
+</Accordion>
+
+<Accordion title="Plan Deviation">
+Measures deviation from planned trajectory:
+
+```yaml
+eval:
+  scorers:
+    plan_deviation:
+      incl_z: false
+      avg_decay_rate: 0.1
+      min_timesteps: 5
+```
+
+Tracks how well the vehicle follows its own planned path.
+</Accordion>
+
+### Distance Between Incidents
+
+**avg_dist_between_incidents**: Average kilometers traveled per incident (collision or offroad)
+- Higher is better
+- Measures safety over distance
+
+**avg_dist_between_incidents_at_fault**: Average kilometers traveled per at-fault incident
+- Excludes rear-end collisions not caused by the driver
+
+### Safety Monitor
+
+**safety_monitor_triggered**: Indicates if safety interventions were required
+
+## Video Generation
+
+AlpaSim generates evaluation videos with multiple layout options:
+
+### Video Layouts
+
+<Tabs>
+  <Tab title="DEFAULT Layout">
+    The default layout provides a comprehensive debug view with three panels:
+    
+    **Components:**
+    - **BEV (Bird's Eye View) map**: Top-down view showing:
+      - Road lanes and edges
+      - Ego vehicle position
+      - Traffic agents
+      - Planned trajectories
+      - Ground truth ghost vehicle
+    - **Camera view**: Front camera feed with optional trajectory overlays
+    - **Metrics table**: Real-time metric values
+    
+    **Configuration:**
+    ```yaml
+    eval:
+      video:
+        video_layouts: ["DEFAULT"]
+        camera_id_to_render: camera_front_wide_120fov
+        overlay_plans_on_camera: true
+    ```
+    
+    **Map Elements:**
+    ```yaml
+    map_video:
+      map_radius_m: 20
+      ego_loc: BOTTOM_CENTER
+      rotate_map_to_ego: true
+      map_elements_to_plot:
+        - ROAD_LANE_CENTER
+        - ROAD_LANE_LEFT_EDGE
+        - ROAD_LANE_RIGHT_EDGE
+        - ROAD_EDGE
+        - STOP_LINE
+        - GT_LINESTRING
+        - EGO_GT_GHOST_POLYGON
+        - DRIVER_RESPONSES
+        - ROUTE
+        - AGENTS
+    ```
+  </Tab>
+  
+  <Tab title="REASONING_OVERLAY Layout">
+    The reasoning overlay layout is designed for models with chain-of-causation reasoning:
+    
+    **Components:**
+    - **First-person camera**: Full driver's view
+    - **Reasoning text overlay**: Model's decision explanations
+    - **Trajectory chart**: Planned vs. actual path visualization
+    
+    **Configuration:**
+    ```yaml
+    eval:
+      video:
+        video_layouts: ["REASONING_OVERLAY"]
+        reasoning_text_refresh_interval_s: 1.0
+    ```
+    
+    **Usage:**
+    ```bash
+    alpasim_wizard +deploy=local \
+      wizard.log_dir=$PWD/tutorial \
+      driver=[ar1,ar1_runtime_configs] \
+      eval.video.video_layouts=[REASONING_OVERLAY]
+    ```
+    
+    <Note>
+    This layout is particularly useful for Alpamayo-R1 and other reasoning-capable models.
+    </Note>
+  </Tab>
+  
+  <Tab title="Both Layouts">
+    Generate both layouts for comprehensive analysis:
+    
+    ```bash
+    alpasim_wizard +deploy=local \
+      wizard.log_dir=$PWD/tutorial \
+      driver=[ar1,ar1_runtime_configs] \
+      eval.video.video_layouts=[DEFAULT,REASONING_OVERLAY]
+    ```
+    
+    This creates two video files per rollout:
+    - `{clipgt_id}_{batch_id}_{rollout_id}_default.mp4`
+    - `{clipgt_id}_{batch_id}_{rollout_id}_reasoning_overlay.mp4`
+  </Tab>
+</Tabs>
+
+### Video Configuration Options
+
+<CodeGroup>
+```yaml Full Video Configuration
+eval:
+  video:
+    # Enable/disable video rendering
+    render_video: true
+    
+    # Layout selection
+    video_layouts: ["DEFAULT"]  # or ["REASONING_OVERLAY"] or both
+    
+    # Camera selection
+    camera_id_to_render: camera_front_wide_120fov
+    
+    # Overlay options
+    overlay_plans_on_camera: true
+    
+    # Performance optimization
+    render_every_nth_frame: 1  # Render every frame (increase to skip frames)
+    
+    # Combined video generation
+    generate_combined_video: false
+    combined_video_speed_factor: 0.33  # Speed adjustment for combined videos
+    
+    # Reasoning overlay specific
+    reasoning_text_refresh_interval_s: 1.0
+    
+    # Metrics display
+    metrics_table_entries:
+      - offroad_or_collision_at_fault
+      - collision_any
+      - collision_at_fault
+      - collision_front
+      - collision_lateral
+      - collision_rear
+      - offroad
+      - dist_to_gt_trajectory
+      - dist_to_gt_location
+      - progress
+      - progress_rel
+      - safety_monitor_triggered
+```
+
+```bash Performance Optimization
+# Render every 5th frame to reduce video generation time
+alpasim_wizard +deploy=local \
+  wizard.log_dir=$PWD/tutorial \
+  eval.video.render_every_nth_frame=5
+```
+
+```bash Disable Video Rendering
+# Skip video generation entirely for faster evaluation
+alpasim_wizard +deploy=local \
+  wizard.log_dir=$PWD/tutorial \
+  eval.video.render_video=false
+```
+</CodeGroup>
+
+## Performance Analysis
+
+AlpaSim automatically generates performance metrics and visualizations:
+
+### Metrics Plot
+
+After each simulation, a comprehensive performance visualization is generated at `{log_dir}/metrics/metrics_plot.png`.
+
+<Accordion title="Metrics Plot Components">
+**3x3 Grid Layout:**
+
+**Row 1: RPC Performance**
+- RPC Duration histogram: Total time from call start to coroutine resumption
+- RPC Blocking histogram: Event loop scheduler delay
+- RPC Queue Depth histogram: Service saturation levels
+
+**Row 2: Simulation Timing**
+- Rollout Duration histogram: Total time per rollout
+- Step Duration histogram: Time per simulation step
+- Service Configuration table: Replica counts and capacity
+
+**Row 3: Resource Utilization**
+- CPU Utilization boxplots: Per-service CPU usage
+- GPU Utilization boxplots: GPU compute usage
+- GPU Memory boxplots: Memory usage with capacity line
+
+**Summary Header:**
+- Async worker idle percentage: Runtime idle time
+- Sim seconds per rollout: Wallclock time per simulation
+</Accordion>
+
+### Performance Metrics File
+
+Raw performance data is stored in `{log_dir}/metrics/metrics.prom` in Prometheus format.
+
+<Steps>
+  <Step title="Locate Metrics">
+    Find the metrics file:
+    ```bash
+    cat {log_dir}/metrics/metrics.prom
+    ```
+  </Step>
+  
+  <Step title="View Visualization">
+    Open the generated plot:
+    ```bash
+    open {log_dir}/metrics/metrics_plot.png
+    ```
+  </Step>
+  
+  <Step title="Analyze Bottlenecks">
+    Look for:
+    - High queue depth → Increase replicas or concurrent rollouts
+    - High RPC duration → Service optimization needed
+    - Low GPU utilization → Underutilized resources
+    - High idle percentage → Check for bottlenecks
+  </Step>
+</Steps>
+
+## Vector Map Configuration
+
+The evaluation system uses vector maps for spatial analysis:
+
+```yaml
+eval:
+  vec_map:
+    incl_road_edges: true
+    incl_traffic_signs: true
+    incl_wait_lines: true
+    max_num_lanes: 20
+    num_pts_per_lane: 20
+```
+
+## Vehicle Configuration
+
+Vehicle geometry for collision detection:
+
+```yaml
+eval:
+  vehicle:
+    vehicle_corner_roundness: 0.5  # Corner radius for collision detection
+    vehicle_shrink_factor: 0.02    # Safety margin (2% shrink)
+```
+
+## Parallel Processing
+
+Evaluation can leverage multiple CPU cores:
+
+```yaml
+eval:
+  num_processes: 16  # Number of parallel evaluation processes
+```
+
+<CodeGroup>
+```bash Single Process (Debugging)
+alpasim_wizard +deploy=local \
+  wizard.log_dir=$PWD/tutorial \
+  eval.num_processes=1
+```
+
+```bash Maximum Parallelism
+alpasim_wizard +deploy=local \
+  wizard.log_dir=$PWD/tutorial \
+  eval.num_processes=32
+```
+</CodeGroup>
+
+<Warning>
+**Performance Considerations:**
+- More processes = faster evaluation but higher CPU usage
+- Video rendering is CPU-intensive; consider `render_every_nth_frame` for optimization
+- For large-scale evaluations, use `+eval=eval_in_separate_job`
+</Warning>
+
+## Best Practices
+
+<Steps>
+  <Step title="Start with Default Settings">
+    Use default evaluation settings initially:
+    ```bash
+    alpasim_wizard +deploy=local wizard.log_dir=$PWD/tutorial
+    ```
+  </Step>
+  
+  <Step title="Enable Reasoning Overlay for AR1">
+    When using reasoning-capable models:
+    ```bash
+    alpasim_wizard +deploy=local \
+      wizard.log_dir=$PWD/tutorial \
+      driver=[ar1,ar1_runtime_configs] \
+      eval.video.video_layouts=[REASONING_OVERLAY]
+    ```
+  </Step>
+  
+  <Step title="Optimize for Large-Scale Runs">
+    For extensive evaluations:
+    ```bash
+    alpasim_wizard +deploy=local \
+      wizard.log_dir=$PWD/tutorial \
+      scenes.test_suite_id=public_2507_ex_failures \
+      eval.video.render_every_nth_frame=5 \
+      eval.num_processes=32
+    ```
+  </Step>
+</Steps>

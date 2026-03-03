@@ -1,0 +1,327 @@
+---
+title: Coordinate systems and transforms
+description: Documentation of coordinate frames, naming conventions, and transform usage in AlpaSim
+---
+
+AlpaSim uses multiple coordinate systems to represent positions, rotations, and transformations throughout the simulation. Proper naming conventions are critical to prevent costly misunderstandings.
+
+## The four coordinate frames
+
+AlpaSim uses four primary coordinate systems:
+
+<Accordion title="Local frame - Scenario inertial frame">
+**Type:** Inertial frame (fixed)
+
+**Definition:**
+- Fixed on a per-scenario basis
+- East-North-Up (ENU) frame defined by NRE
+- Acts as the primary reference frame for simulation
+
+**Usage:**
+- World state representation
+- Primary coordinate system for most calculations
+- Reference frame for logging
+</Accordion>
+
+<Accordion title="Rig frame - Ego vehicle body frame">
+**Type:** Body-fixed frame (moves with vehicle)
+
+**Definition:**
+- **x-axis:** Points forward
+- **y-axis:** Points to the left (when looking forward)
+- **z-axis:** Points up
+- **Origin:** Center of rear axle, projected onto ground plane
+
+**Usage:**
+- Ego vehicle pose representation
+- Driver planning outputs
+- Vehicle-centric calculations
+
+<Info>
+The rig frame is the standard body-fixed frame for the ego vehicle. Most vehicle-relative quantities are expressed in this frame.
+</Info>
+</Accordion>
+
+<Accordion title="AABB frame - Bounding box frame">
+**Type:** Body-fixed frame (moves with object)
+
+**Definition:**
+- Same orientation as rig frame (x forward, y left, z up)
+- **Origin:** Center of the object's Axis-Aligned Bounding Box
+
+**Usage:**
+- Actor representations
+- Traffic simulation
+- Physics constraints
+- Collision detection
+
+<Note>
+The AABB frame uses the same orientation convention as rig but with a different origin point.
+</Note>
+</Accordion>
+
+<Accordion title="ECEF frame - Global reference">
+**Type:** Inertial frame (global)
+
+**Definition:**
+- Earth-Centered, Earth-Fixed frame
+- Based on WGS84 coordinate system
+- Global positioning reference
+
+**Usage:**
+- GPS coordinates
+- Global positioning
+- Map data integration
+</Accordion>
+
+### Special frame: Noised/estimated frame
+
+To mimic proprioceptive noise, the ego position sent to the driver includes estimation error:
+
+- Can be thought of as `local -> rig_est` transformation
+- Equivalently: `local_est -> rig` transformation
+- Runtime translates waypoints from noised frame back to true `local` frame
+
+## Naming conventions
+
+### Vectors (positions, velocities, accelerations)
+
+Vector names must include enough information to determine:
+1. The "tail" of the vector
+2. The "tip" of the vector  
+3. The reference frame
+
+<Tabs>
+  <Tab title="Good examples">
+    ```python
+    # Position of object in local frame
+    position_object_local = np.array([1, 2, 3])
+    position_object_in_local = np.array([1, 2, 3])  # Also acceptable
+    object_position_local = np.array([1, 2, 3])     # Also acceptable
+    
+    # Relative position between objects
+    position_front_axle_in_rig = np.array([3, 0.0, 0.1])
+    obj1_to_obj2_in_aabb = np.array([10.0, 20.0, 0.0])
+    
+    # Position vectors in local frame
+    position_rig_local = np.array([...])
+    position_aabb_local = position_rig_local + rig_to_aabb_in_local
+    ```
+  </Tab>
+  
+  <Tab title="Bad examples">
+    ```python
+    # Bad: What location? What frame?
+    position = np.array([1, 2, 3])
+    
+    # Bad: Better but unclear which object
+    position_local = np.array([1, 2, 3])
+    
+    # Bad: Reference frame unclear
+    position_front_axle = np.array([3, 0.0, 0.1])
+    obj1_to_obj2 = np.array([10.0, 20.0, 0.0])
+    ```
+  </Tab>
+</Tabs>
+
+### Rotations and poses
+
+Rotations and poses follow an **active convention**:
+- The "A to B" transform moves a quantity from frame A to frame B
+- All transformations are active unless explicitly noted
+
+<Tabs>
+  <Tab title="Good examples">
+    ```python
+    from scipy.spatial.transform import Rotation
+    from alpasim_utils import QVec
+    
+    # Rotations between frames
+    rotation_local_to_rig = Rotation.from_quat([...])
+    
+    # Poses (rotation + translation)
+    pose_rig_to_aabb = QVec(vec3=..., quat=...)
+    transform_rig_to_aabb = QVec(vec3=..., quat=...)  # Also acceptable
+    
+    # From actual source code (src/runtime/alpasim_runtime/loop.py)
+    pose_local_to_rig = self.ego_trajectory.poses[-1]
+    trajectory_in_rig = trajectory.transform(pose_local_to_rig.inverse())
+    ```
+  </Tab>
+  
+  <Tab title="Bad examples">
+    ```python
+    # Bad: What rotation? What frames?
+    rotation = Rotation.from_quat([...])
+    
+    # Bad: What pose? What frames?
+    pose = QVec(vec3=..., quat=...)
+    ```
+  </Tab>
+</Tabs>
+
+## Active vs passive transforms
+
+<Warning>
+Understanding the difference between active and passive transforms is crucial.
+</Warning>
+
+**Definition:**
+- **Active transform:** Moves or rotates an object within a fixed coordinate frame
+- **Passive transform:** Changes the coordinate frame in which the object is described
+
+**Key relationship:**
+- Position of B in frame A = Active transform from A to B (i.e., `A->B`)
+- To change notation from frame A to frame B: Use passive transform `B->A = (A->B).inverse()`
+
+### Example from source
+
+```python
+# From CONTRIBUTING.md example
+pose_ego_rig_to_aabb = QVec(vec3=..., quat=...)
+pose_local_to_ego_rig = QVec(vec3=..., quat=...)
+
+# Compose transforms
+position_ego_aabb_local = (pose_local_to_ego_rig @ pose_ego_rig_to_aabb).vec3
+```
+
+## QVec: Quaternion + vector representation
+
+AlpaSim uses the `QVec` class for representing poses:
+
+```python
+from alpasim_utils import QVec
+import numpy as np
+
+# Create a pose
+pose = QVec(
+    vec3=np.array([1.0, 2.0, 3.0]),  # Translation
+    quat=np.array([0.0, 0.0, 0.0, 1.0])  # Rotation (x, y, z, w)
+)
+
+# Compose transforms using @ operator
+pose_a_to_c = pose_a_to_b @ pose_b_to_c
+
+# Inverse transform
+pose_b_to_a = pose_a_to_b.inverse()
+
+# Convert to SE3 matrix
+se3_matrix = pose.as_se3()
+```
+
+### Real example from source
+
+```python
+# From src/runtime/alpasim_runtime/loop.py:1061
+pose_rig0_to_rig1 = pose_local_to_rig_t0.inverse() @ pose_local_to_rig_t1
+```
+
+This computes the transformation from rig at time t0 to rig at time t1:
+1. `pose_local_to_rig_t0.inverse()` gives `rig_t0 -> local`
+2. Composed with `pose_local_to_rig_t1` (i.e., `local -> rig_t1`)
+3. Result: `rig_t0 -> rig_t1`
+
+## Service communication frames
+
+Each service expects data in specific coordinate frames:
+
+<Accordion title="Driver service">
+**Inputs:**
+- `submit_trajectory`: Noised history in `local` frame
+- `submit_route`: Waypoints in `noisy rig` frame
+- `submit_recording_ground_truth`: GT trajectory in `rig` frame
+
+**Outputs:**
+- `drive` responses: Poses in (noisy) `local` frame
+- Runtime must map from noisy `local` to true `local` frame
+</Accordion>
+
+<Accordion title="Controller service">
+**Inputs:**
+- Current `pose_local_to_rig`
+- Linear/angular velocities
+- Reference trajectory in `rig` frame
+
+**Outputs:**
+- Future `local->rig` poses
+- Estimated poses
+
+**Example from source:**
+```python
+# From src/runtime/alpasim_runtime/services/controller_service.py
+request.state.pose.CopyFrom(pose_local_to_rig.as_grpc_pose())
+```
+</Accordion>
+
+<Accordion title="Physics service">
+**Inputs:**
+- Ego and traffic poses as `local -> AABB` transformations
+
+**Outputs:**
+- Constrained poses in same `local -> AABB` frame
+</Accordion>
+
+<Accordion title="Traffic service">
+**Inputs & Outputs:**
+- All communication as `local -> AABB` transformations
+</Accordion>
+
+<Accordion title="Sensorsim service">
+**Inputs:**
+- Rig trajectory in `local` frame
+- Per-camera calibration `rig->sensor_pose`
+- `local->AABB` trajectories for dynamic objects
+
+**Outputs:**
+- Rendered images (no coordinate frame)
+</Accordion>
+
+## Logging conventions
+
+**ActorPoses log entries:**
+- Store every actor in `AABB` frame relative to `local` frame
+- Metadata captures `rig->AABB` transform for replay
+
+**RoadCast conventions:**
+- Per DriveWorks conventions
+- Majority of quantities in `rig` frame
+
+## Best practices
+
+<Note>
+**Always follow these naming conventions:**
+
+1. Include frame information in all variable names
+2. Use descriptive names: `pose_local_to_rig` not `pose`
+3. Be consistent with the active transform convention
+4. Document any deviations from these conventions
+5. Use type hints to clarify QVec vs np.ndarray usage
+</Note>
+
+### Common patterns
+
+```python
+# Route generation (from src/runtime/alpasim_runtime/route_generator.py)
+def generate_route(self, timestamp_us: int, pose_local_to_rig: QVec) -> Polyline:
+    """Generate route in rig frame from current position.
+    
+    Args:
+        timestamp_us: Current simulation time
+        pose_local_to_rig: Pose of the local frame to the rig frame
+    
+    Returns:
+        Route polyline in rig frame
+    """
+    self._ensure_sufficient_waypoints(pose_local_to_rig.vec3)
+    
+    # Transform route to rig frame
+    route_in_rig = route_in_local.transform(
+        pose_local_to_rig.inverse()
+    )
+    return route_in_rig
+```
+
+This pattern shows:
+1. Clear parameter naming with frame information
+2. Use of `.inverse()` for passive transform (changing coordinate frame)
+3. Documentation of which frames are involved

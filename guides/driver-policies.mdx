@@ -1,0 +1,182 @@
+---
+title: Driver Policies
+description: Supported driving policies and how to use them in AlpaSim
+---
+
+The driver in AlpaSim is a policy for the ego vehicle that takes in sensor inputs and optional navigation commands, and outputs a trajectory for the ego vehicle to follow, along with other optional outputs, such as chain-of-causation reasoning text.
+
+The driver is specified by a pair of config files under `src/wizard/configs/`, one for the driver service itself, and one for the runtime (so that it provides the inputs required for the specific driver).
+
+## VaVAM (Default Driver)
+
+The wizard uses [VaVAM](https://github.com/valeoai/VideoActionModel) as the default driver. This is a vision-based action model that learns to drive from video inputs.
+
+### Using VaVAM
+
+To explicitly define the VaVAM driver config:
+
+```bash
+alpasim_wizard +deploy=local wizard.log_dir=$PWD/tutorial_vavam driver=[vavam,vavam_runtime_configs]
+```
+
+### VaVAM Configuration
+
+VaVAM runs at 2Hz inference frequency with the following parameters:
+
+- **Inference frequency**: 2Hz (500ms between decisions)
+- **Force GT duration**: 3 seconds
+- **Simulation steps**: 100
+- **Camera resolution**: 1920x1080
+- **Frame interval**: 500ms (synchronized with inference)
+
+<Note>
+The model weights are automatically downloaded using `data/download_vavam_assets.sh` and stored in `data/vavam-driver/`.
+</Note>
+
+## Alpamayo-R1
+
+Alpamayo-R1 is a reasoning-capable autonomous driving model with 10 billion parameters that can provide chain-of-causation explanations for its driving decisions.
+
+### Model Download
+
+First, download the model weights from HuggingFace:
+
+```bash
+huggingface-cli download nvidia/Alpamayo-R1-10B
+```
+
+The wizard will use the `HF_HOME` environment variable to find the system HuggingFace cache (`~/.cache/huggingface` by default). If the model weights do not exist locally, the driver service will automatically download them, but the download may timeout, requiring you to re-run.
+
+<Note>
+Alternatively, you can specify the path to the model directory by setting the `model.checkpoint_path` configuration field.
+</Note>
+
+### Running Alpamayo-R1
+
+<Steps>
+  <Step title="Run with Alpamayo-R1">
+    Execute the wizard with the Alpamayo-R1 driver configuration:
+    
+    ```bash
+    alpasim_wizard +deploy=local wizard.log_dir=$PWD/tutorial_alpamayo driver=[ar1,ar1_runtime_configs]
+    ```
+  </Step>
+  
+  <Step title="Visualize Reasoning (Optional)">
+    To visualize the predicted chain-of-causation reasoning, change the generated video layout:
+    
+    ```bash
+    alpasim_wizard +deploy=local wizard.log_dir=$PWD/tutorial_alpamayo driver=[ar1,ar1_runtime_configs] eval.video.video_layouts=[REASONING_OVERLAY]
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+The Alpamayo-R1 model is large (10B parameters). Please ensure that your GPU has sufficient capacity to run it.
+</Warning>
+
+### Alpamayo-R1 Configuration
+
+Alpamayo-R1 uses multiple cameras:
+
+- **Front wide camera** (120° FOV): 1080x1900 resolution
+- **Front tele camera** (30° FOV): 1080x1900 resolution
+- **Left cross camera** (120° FOV): 1080x1900 resolution
+- **Right cross camera** (120° FOV): 1080x1900 resolution
+
+All cameras run at **10Hz** (100ms frame interval) with synchronized inference.
+
+## Video Layout Options
+
+You can choose which video layouts to render via `eval.video.video_layouts`.
+
+<Tabs>
+  <Tab title="DEFAULT">
+    The default layout shows:
+    - BEV (Bird's Eye View) map visualization
+    - Camera view
+    - Metrics table
+    
+    ```bash
+    alpasim_wizard +deploy=local wizard.log_dir=$PWD/tutorial driver=[vavam,vavam_runtime_configs] eval.video.video_layouts=[DEFAULT]
+    ```
+  </Tab>
+  
+  <Tab title="REASONING_OVERLAY">
+    The reasoning overlay layout shows:
+    - First-person camera with reasoning text overlay
+    - Trajectory chart on the right side
+    
+    This layout is particularly useful for understanding the model's decision-making process.
+    
+    ```bash
+    alpasim_wizard +deploy=local wizard.log_dir=$PWD/tutorial driver=[ar1,ar1_runtime_configs] eval.video.video_layouts=[REASONING_OVERLAY]
+    ```
+    
+    <Note>
+    The reasoning text is refreshed every 1.0 seconds by default. You can adjust this with `eval.video.reasoning_text_refresh_interval_s`.
+    </Note>
+  </Tab>
+  
+  <Tab title="Both Layouts">
+    You can generate both layouts per rollout:
+    
+    ```bash
+    alpasim_wizard +deploy=local wizard.log_dir=$PWD/tutorial driver=[ar1,ar1_runtime_configs] eval.video.video_layouts=[DEFAULT,REASONING_OVERLAY]
+    ```
+  </Tab>
+</Tabs>
+
+## Transfuser (Provisional)
+
+As an example for how to integrate a different driver model, AlpaSim provides a provisional integration for the [Transfuser](https://github.com/autonomousvision/lead?tab=readme-ov-file#beyond-carla-cross-benchmark-deployment) policy, specifically the Latent TransFuser v6 (LTFv6) model developed for [NAVSIM](https://github.com/autonomousvision/navsim).
+
+### Model Download
+
+First, download the Transfuser model weights and config from HuggingFace:
+
+```bash
+huggingface-cli download longpollehn/tfv6_navsim model_0060.pth --local-dir=data/drivers/transfuser/
+huggingface-cli download longpollehn/tfv6_navsim config.json --local-dir=data/drivers/transfuser/
+```
+
+### Running Transfuser
+
+Run the wizard with the Transfuser configuration:
+
+```bash
+alpasim_wizard +deploy=local wizard.log_dir=$PWD/tutorial_transfuser driver=[transfuser,transfuser_runtime_configs]
+```
+
+## Log Replay Driver
+
+If you would like to force the ego vehicle to follow its recorded trajectory, instead of following the predictions of a policy, you can configure the simulation in log replay mode.
+
+<CodeGroup>
+```bash Command Line
+alpasim_wizard +deploy=local wizard.log_dir=$PWD/tutorial_replay \
+  runtime.endpoints.physics.skip=true \
+  runtime.endpoints.trafficsim.skip=true \
+  runtime.endpoints.controller.skip=true \
+  runtime.default_scenario_parameters.physics_update_mode=NONE \
+  runtime.default_scenario_parameters.force_gt_duration_us=20000000
+```
+
+```yaml Configuration
+runtime:
+  endpoints:
+    physics:
+      skip: true
+    trafficsim:
+      skip: true
+    controller:
+      skip: true
+  default_scenario_parameters:
+    physics_update_mode: NONE
+    force_gt_duration_us: 20000000  # 20+ seconds
+```
+</CodeGroup>
+
+<Note>
+In log replay mode, the ego vehicle follows the exact trajectory from the original recording, which is useful for evaluation and debugging purposes.
+</Note>
