@@ -409,3 +409,81 @@ grpc_traj = clipped.to_grpc()
 - [Runtime Module](/api/runtime) - Uses trajectories and utils
 - [Evaluation Module](/api/eval) - Processes trajectory data
 - [gRPC Common Types](/api/grpc/overview) - Proto message conversions
+## CLI Tools
+
+The utils module provides command-line tools for working with AlpaSim data.
+
+### print-asl
+
+Print ASL log entries for debugging and inspection.
+
+```bash
+# Print all entries
+print-asl rollout.asl
+
+# Print specific range
+print-asl rollout.asl --start 10 --end 100
+
+# Print only specific message types
+print-asl rollout.asl --message-types actor_poses drive_response
+
+# Print only message types (not content)
+print-asl rollout.asl --just-types
+```
+
+<ParamField path="asl_file" type="string" required>
+  Path to the .asl file to print
+</ParamField>
+
+<ParamField path="--start" type="int" default="0">
+  Index of the first message to print
+</ParamField>
+
+<ParamField path="--end" type="int" default="None">
+  Index of the last message to print (default: print all)
+</ParamField>
+
+<ParamField path="--message-types" type="list">
+  Message types to filter (e.g., actor_poses, drive_response, camera_image)
+</ParamField>
+
+<ParamField path="--just-types" type="flag">
+  Only print message types, not full content
+</ParamField>
+
+### asl-to-frames
+
+Extract camera frames from ASL logs and save as video or images.
+
+```bash
+# Extract frames as MP4 video
+asl-to-frames rollout.asl --output-format mp4
+
+# Extract as individual JPEG images
+asl-to-frames rollout.asl --output-format jpeg
+
+# Process multiple files with glob
+asl-to-frames "rollouts/**/*.asl" --output-format mp4
+
+# Specify output directory
+asl-to-frames rollout.asl --output-dir ./frames --output-format png
+```
+
+Output is saved to `<asl_file_dir>/<asl_file_name>_asl_frames/<camera_id>/<mp4_or_images>`.
+
+<ParamField path="asl_file" type="string" required>
+  Path or glob pattern for .asl files
+</ParamField>
+
+<ParamField path="--output-format" type="string" default="mp4">
+  Output format: mp4, jpeg, or png
+</ParamField>
+
+<ParamField path="--output-dir" type="string">
+  Custom output directory (default: same as input file)
+</ParamField>
+
+<Note>
+Requires `imageio[ffmpeg]` for video output. Install with: `pip install imageio[ffmpeg]`
+</Note>
+

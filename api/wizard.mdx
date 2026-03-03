@@ -481,3 +481,34 @@ The wizard respects these environment variables:
 - [Runtime Module](/api/runtime) - Executed by wizard
 - [Evaluation Module](/api/eval) - Configured by wizard
 - [gRPC Services](/api/grpc/overview) - Deployed by wizard
+## CLI Commands
+
+### alpasim_wizard
+
+Main wizard command for configuration and deployment.
+
+```bash
+alpasim_wizard +deploy=local wizard.log_dir=$PWD/tutorial
+```
+
+See [Configuration](#configuration) section above for full usage.
+
+### alpasim_check_config
+
+Validates wizard configuration without running simulation. Useful for quick config checks on login nodes.
+
+```bash
+alpasim_check_config --config wizard-config.yaml
+```
+
+This command:
+- Validates YAML syntax and schema
+- Checks NRE version compatibility
+- Verifies scene availability
+- Validates service configurations
+- Does not launch any services
+
+<Tip>
+Use `alpasim_check_config` before submitting large batch jobs to catch configuration errors early.
+</Tip>
+
